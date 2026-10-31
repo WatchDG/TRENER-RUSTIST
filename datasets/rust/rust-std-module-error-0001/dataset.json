@@ -1,0 +1,58 @@
+{
+  "format": "jolt-tasks",
+  "format_version": 1,
+  "name": "rust-std-module-error-0001",
+  "description": "Questions about the standard library module std::error in four formulations (module overview, then the only non-experimental item of the module, the trait Error); answers are key phrases (answer_type phrase).",
+  "source": "https://doc.rust-lang.org/std/error/index.html",
+  "default_answer_type": "phrase",
+  "splits": {
+    "train": {
+      "files": [
+        {
+          "file": "train.module-what-it-is.jsonl",
+          "records": 2,
+          "sha256": "766dc2920caa88f99a5a4ed0b4005f90df5ba5c71773ae728f999d289800049a"
+        },
+        {
+          "file": "train.module-what-it-is-used-for.jsonl",
+          "records": 2,
+          "sha256": "421e73d393410e15837f1c0d01557789635ba669e32ca118802fe4862a4fc5ba"
+        },
+        {
+          "file": "train.what-it-is.jsonl",
+          "records": 2,
+          "sha256": "ba39e881da889d8d73ae2b928b904b1a09f87249a9b948373ebef416ba91833c"
+        },
+        {
+          "file": "train.what-it-is-used-for.jsonl",
+          "records": 2,
+          "sha256": "26d80af01e555da5584d21c378059a24ec732368f2ffeea3643d308dbba75355"
+        }
+      ]
+    },
+    "test": {
+      "files": [
+        {
+          "file": "test.module-what-it-is.jsonl",
+          "records": 1,
+          "sha256": "894b2f11f068f16dc9577d85cbd9dd4e2d6d95e5789ef11605183e2e5497425f"
+        },
+        {
+          "file": "test.module-what-it-is-used-for.jsonl",
+          "records": 1,
+          "sha256": "9fb5674acff3b74e3d87b5a8dc56ab74f10b1f2f8187a068964870e79ec7c332"
+        },
+        {
+          "file": "test.what-it-is.jsonl",
+          "records": 1,
+          "sha256": "625aa6287540d2ffb38592c65bb94d55f1f6f4c0acaa838d8a0169bed39c41a2"
+        },
+        {
+          "file": "test.what-it-is-used-for.jsonl",
+          "records": 1,
+          "sha256": "8b1adbb45505410b28bbdeec0e9a35f5affb92dfdee3d52a75d45302a6399990"
+        }
+      ]
+    }
+  }
+}

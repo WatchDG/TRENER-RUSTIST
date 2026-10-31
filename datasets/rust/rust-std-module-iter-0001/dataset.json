@@ -1,0 +1,58 @@
+{
+  "format": "jolt-tasks",
+  "format_version": 1,
+  "name": "rust-std-module-iter-0001",
+  "description": "Questions about the standard library module std::iter in four formulations (module overview, then the non-experimental items of the module); answers are key phrases (answer_type phrase).",
+  "source": "https://doc.rust-lang.org/std/iter/index.html",
+  "default_answer_type": "phrase",
+  "splits": {
+    "train": {
+      "files": [
+        {
+          "file": "train.module-what-it-is.jsonl",
+          "records": 2,
+          "sha256": "70ecc4767a9246e65e1d061aa3af105dee6ade2504e799f07deaf18601abb0d4"
+        },
+        {
+          "file": "train.module-what-it-is-used-for.jsonl",
+          "records": 2,
+          "sha256": "0c437a4755c42193073fdc556448bbe0a36449297aaf4cf4a072cc351b6bee0e"
+        },
+        {
+          "file": "train.what-it-is.jsonl",
+          "records": 98,
+          "sha256": "d499db4b6a2ab2b1b297a81089e00e78c8d7b121e59a29d25fa00fa81ffa49ca"
+        },
+        {
+          "file": "train.what-it-is-used-for.jsonl",
+          "records": 98,
+          "sha256": "aa5ddc953358b15189a3185144b4f3094c77e3185315827df1eff2aba3912e70"
+        }
+      ]
+    },
+    "test": {
+      "files": [
+        {
+          "file": "test.module-what-it-is.jsonl",
+          "records": 1,
+          "sha256": "8811895d712b3a4f8b8d9227d63925930fe164ac5ef3a73b425dc0549b2eb308"
+        },
+        {
+          "file": "test.module-what-it-is-used-for.jsonl",
+          "records": 1,
+          "sha256": "0a4c70d7ef987f9fbd421da6f3258aa7a3aa93eeb6332f39abf4c752851a6c23"
+        },
+        {
+          "file": "test.what-it-is.jsonl",
+          "records": 49,
+          "sha256": "7e0c1f7d91da0a353965c3f8c16dbc46eb00ceb9d7ea12b491bf94444a2f5496"
+        },
+        {
+          "file": "test.what-it-is-used-for.jsonl",
+          "records": 49,
+          "sha256": "8d5935dd089f73dd440cebcca9808b41c5642b71f081415461a067430b698cba"
+        }
+      ]
+    }
+  }
+}

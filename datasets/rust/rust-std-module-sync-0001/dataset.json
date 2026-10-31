@@ -1,0 +1,58 @@
+{
+  "format": "jolt-tasks",
+  "format_version": 1,
+  "name": "rust-std-module-sync-0001",
+  "description": "Questions about the standard library module std::sync in four formulations (module overview, then the non-experimental items of the module); answers are key phrases (answer_type phrase).",
+  "source": "https://doc.rust-lang.org/std/sync/index.html",
+  "default_answer_type": "phrase",
+  "splits": {
+    "train": {
+      "files": [
+        {
+          "file": "train.module-what-it-is.jsonl",
+          "records": 2,
+          "sha256": "6398e26b554bd36f36fc91f676769c7cd677a3b0f72ff7fa204a6097d47fa11d"
+        },
+        {
+          "file": "train.module-what-it-is-used-for.jsonl",
+          "records": 2,
+          "sha256": "1589086069944dc823afbf17ef68098612889199d931fa396efdbb0181bda669"
+        },
+        {
+          "file": "train.what-it-is.jsonl",
+          "records": 44,
+          "sha256": "9eea31100ec13394cee73773c1b863fd17e5115a25f6738d318f0aa47ff0a819"
+        },
+        {
+          "file": "train.what-it-is-used-for.jsonl",
+          "records": 44,
+          "sha256": "938419cad939054c9ef669ebe9be69e366f220615a30726fabb88dd12231a33f"
+        }
+      ]
+    },
+    "test": {
+      "files": [
+        {
+          "file": "test.module-what-it-is.jsonl",
+          "records": 1,
+          "sha256": "14200c2a82cb872eecd9a3dc04e6071ce97cfad9e855a8548745246f6263f9c5"
+        },
+        {
+          "file": "test.module-what-it-is-used-for.jsonl",
+          "records": 1,
+          "sha256": "fd7e7652847e1de34174bdf965984a7abec82c299821b35f2ca2dbbad50fa687"
+        },
+        {
+          "file": "test.what-it-is.jsonl",
+          "records": 22,
+          "sha256": "319bbe2c85bf98f110d6a66b13d30a553507539f2803376491a73a2e7894d932"
+        },
+        {
+          "file": "test.what-it-is-used-for.jsonl",
+          "records": 22,
+          "sha256": "107244540f2e2e90203b8c6e81ffcc190c280c71099d851bb28c595c448ddcf2"
+        }
+      ]
+    }
+  }
+}

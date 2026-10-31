@@ -1,0 +1,39 @@
+name: Bug report
+description: Something in the pipeline fails or behaves differently from the docs
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you expected and what you got instead.
+    validations:
+      required: true
+  - type: textarea
+    id: command
+    attributes:
+      label: Command and config
+      description: The exact command, the config file (or its path in `configs/`) and any `--set` overrides.
+      render: powershell
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Log or traceback
+      description: The relevant part of the console output or `runs/<name>/` logs.
+      render: text
+  - type: input
+    id: commit
+    attributes:
+      label: trener commit
+      placeholder: "git rev-parse --short HEAD"
+    validations:
+      required: true
+  - type: textarea
+    id: env
+    attributes:
+      label: Environment
+      description: OS, Python, PyTorch and CUDA versions, GPU and driver (`runs/<name>/env.txt` has most of it).
+    validations:
+      required: true

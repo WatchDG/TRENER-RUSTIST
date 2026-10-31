@@ -1,0 +1,58 @@
+{
+  "format": "jolt-tasks",
+  "format_version": 1,
+  "name": "rust-std-module-mem-0001",
+  "description": "Questions about the standard library module std::mem in four formulations (module overview, then the non-experimental items of the module); answers are key phrases (answer_type phrase).",
+  "source": "https://doc.rust-lang.org/std/mem/index.html",
+  "default_answer_type": "phrase",
+  "splits": {
+    "train": {
+      "files": [
+        {
+          "file": "train.module-what-it-is.jsonl",
+          "records": 2,
+          "sha256": "2adcfdfe15c285c497e0900f68214bdec5a404443d71276da6d964e61184362a"
+        },
+        {
+          "file": "train.module-what-it-is-used-for.jsonl",
+          "records": 2,
+          "sha256": "b15c3898a6656997eab7dc563c4812dee120ddf951b5a67de6f8dd92d09fb0ad"
+        },
+        {
+          "file": "train.what-it-is.jsonl",
+          "records": 46,
+          "sha256": "8dfb58fdb9452a141251b68f353b2ecbe77f136d5abe0cf97586ca62b29953cf"
+        },
+        {
+          "file": "train.what-it-is-used-for.jsonl",
+          "records": 46,
+          "sha256": "69158dd64427a295746ee6cc04afe787d37c6f023f504dbd1566834f04b68cc2"
+        }
+      ]
+    },
+    "test": {
+      "files": [
+        {
+          "file": "test.module-what-it-is.jsonl",
+          "records": 1,
+          "sha256": "6460612d3c69408746c5d6b18e0b64a1bf9da9384fd8fdbddecd2f4dbd60f57e"
+        },
+        {
+          "file": "test.module-what-it-is-used-for.jsonl",
+          "records": 1,
+          "sha256": "89cb521f9adf31b970b26136e751363fa945121f757f6783fff4a135f419bfe7"
+        },
+        {
+          "file": "test.what-it-is.jsonl",
+          "records": 23,
+          "sha256": "ce8bab9708a2973736966ebe57972b9c55e4ee11e2009d7f13ff35d0b0f47ade"
+        },
+        {
+          "file": "test.what-it-is-used-for.jsonl",
+          "records": 23,
+          "sha256": "618fa4dde8980661ebfce901224cfaab53fd8c8c36ca936ddbe51f114e7e9f7e"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,36 @@
+# Training artifacts
+checkpoints/
+runs/
+wandb/
+outputs/
+*.pt
+*.safetensors
+*.bin
+# Assembled full models (`sequence` stages with `dist`, docs/07-usage.md)
+/dist/
+# Downloaded base models (docs/07-usage.md, 7.1a)
+/models/
+
+# Data / caches
+.cache/
+/data/
+/datasets/rust-docs/.rustdoc-target/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Logs
+*.log
+
+# Editor and OS state
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db

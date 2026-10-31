@@ -1,0 +1,58 @@
+{
+  "format": "jolt-tasks",
+  "format_version": 1,
+  "name": "rust-std-module-f64-0001",
+  "description": "Questions about the standard library module std::f64 in four formulations (module overview, then the non-experimental items of the module); answers are key phrases (answer_type phrase).",
+  "source": "https://doc.rust-lang.org/std/f64/index.html",
+  "default_answer_type": "phrase",
+  "splits": {
+    "train": {
+      "files": [
+        {
+          "file": "train.module-what-it-is.jsonl",
+          "records": 2,
+          "sha256": "ad16ae3005f5f15ea64c238f6d5b6f3d090ad1b26d64dba116dcaa6e5b4c6fad"
+        },
+        {
+          "file": "train.module-what-it-is-used-for.jsonl",
+          "records": 2,
+          "sha256": "7dbdcf00844f70b01c66a7ddd31d01e4d41e909b198aaabb7ef587ede45b4f9b"
+        },
+        {
+          "file": "train.what-it-is.jsonl",
+          "records": 30,
+          "sha256": "c7030f4eda08949185366c5fc0b5903921b9aa09e50de0a97b42c9284d171cdf"
+        },
+        {
+          "file": "train.what-it-is-used-for.jsonl",
+          "records": 30,
+          "sha256": "52cffb0ea3167de6fb1d121048bb39fd3092ce1e57222042a64f941cabe7568d"
+        }
+      ]
+    },
+    "test": {
+      "files": [
+        {
+          "file": "test.module-what-it-is.jsonl",
+          "records": 1,
+          "sha256": "04941770dbddf480bb2b90a7b59e4681cad9d8fbe0305749fe838548d04ba075"
+        },
+        {
+          "file": "test.module-what-it-is-used-for.jsonl",
+          "records": 1,
+          "sha256": "63fa93c7c00abd8337d66556feb946809043806d1dc2ab396daa09d600dbd30d"
+        },
+        {
+          "file": "test.what-it-is.jsonl",
+          "records": 15,
+          "sha256": "70f176d6261c56ee9aff5cc1ea642e4658eb4eb6e321dec16e63d9f8d6d7c887"
+        },
+        {
+          "file": "test.what-it-is-used-for.jsonl",
+          "records": 15,
+          "sha256": "a1d917efe0a7d81037c282a4404460e9ea6d2e09e19db9900f0d4c0b0571fe1d"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,58 @@
+{
+  "format": "jolt-tasks",
+  "format_version": 1,
+  "name": "rust-std-module-env-0001",
+  "description": "Questions about the standard library module std::env in four formulations (module overview, then the non-experimental items of the module); answers are key phrases (answer_type phrase).",
+  "source": "https://doc.rust-lang.org/std/env/index.html",
+  "default_answer_type": "phrase",
+  "splits": {
+    "train": {
+      "files": [
+        {
+          "file": "train.module-what-it-is.jsonl",
+          "records": 2,
+          "sha256": "81287d372c98c7f68830af07756166fdd00045444aa9c412ae44e05532120c67"
+        },
+        {
+          "file": "train.module-what-it-is-used-for.jsonl",
+          "records": 2,
+          "sha256": "2b15a56945f924c4e6352e7906b4ab5808f2f0c5e2f13f5af165d5159f07f364"
+        },
+        {
+          "file": "train.what-it-is.jsonl",
+          "records": 46,
+          "sha256": "764510b5e924330ef711c00d912b523f9ac0f0cdeb9d04fb4b176f41e989d0a5"
+        },
+        {
+          "file": "train.what-it-is-used-for.jsonl",
+          "records": 46,
+          "sha256": "23ce064bc372e9e92a1d6ae3aad399e3d1f19667ebf57a916c235e43312a1009"
+        }
+      ]
+    },
+    "test": {
+      "files": [
+        {
+          "file": "test.module-what-it-is.jsonl",
+          "records": 1,
+          "sha256": "412592715590f349c7fafa0be4f16a73c06c0d7f3bf00a41e299fd22aea23c42"
+        },
+        {
+          "file": "test.module-what-it-is-used-for.jsonl",
+          "records": 1,
+          "sha256": "9ef22ae7db0c842d58a11d3c28c22d8804ea5ecf119bfd9b63f73b548f5b9ae6"
+        },
+        {
+          "file": "test.what-it-is.jsonl",
+          "records": 23,
+          "sha256": "6ca27e994c8a1c8dab733bcc6847a92328fadf83dee8695dab8d7334595bf6bb"
+        },
+        {
+          "file": "test.what-it-is-used-for.jsonl",
+          "records": 23,
+          "sha256": "d925c343ede607c05658868af1b49380856dbb79392590ff41d87c4ad0adc22c"
+        }
+      ]
+    }
+  }
+}

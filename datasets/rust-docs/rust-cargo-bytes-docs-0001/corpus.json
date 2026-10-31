@@ -1,0 +1,32 @@
+{
+  "format": "jolt-corpus",
+  "format_version": 1,
+  "name": "rust-cargo-bytes-docs-0001",
+  "description": "rustdoc JSON: bytes 1.12.1",
+  "source": "datasets/rust-docs/.rustdoc-target/doc",
+  "splits": {
+    "train": {
+      "files": [
+        {
+          "file": "train.text.jsonl",
+          "records": 217,
+          "sha256": "3fa8c6bbbcaa12a6872a9cf65e556278b463458da0dcb0c07e5d03de72510934"
+        },
+        {
+          "file": "train.qa.jsonl",
+          "records": 872,
+          "sha256": "8d31cc80430bfda5d3794f7b25cdd3eda7d510879bc8a81a64b11bf240cb53b3"
+        }
+      ]
+    },
+    "test": {
+      "files": [
+        {
+          "file": "test.qa.jsonl",
+          "records": 11,
+          "sha256": "d910b32e59e1e09aed17b0ab9835e2a48325e5a95cc84b53345e289a31fb49e2"
+        }
+      ]
+    }
+  }
+}

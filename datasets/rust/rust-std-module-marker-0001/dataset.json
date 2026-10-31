@@ -1,0 +1,58 @@
+{
+  "format": "jolt-tasks",
+  "format_version": 1,
+  "name": "rust-std-module-marker-0001",
+  "description": "Questions about the standard library module std::marker in four formulations (module overview, then the non-experimental derive macro Copy, the structs PhantomData and PhantomPinned and the traits Copy, Send, Sized, Sync and Unpin); answers are key phrases (answer_type phrase).",
+  "source": "https://doc.rust-lang.org/std/marker/index.html",
+  "default_answer_type": "phrase",
+  "splits": {
+    "train": {
+      "files": [
+        {
+          "file": "train.module-what-it-is.jsonl",
+          "records": 2,
+          "sha256": "cc550a0f67bd8e7b82c3c77bc57967096b6181e8315a6d75eb5d5519a83a20be"
+        },
+        {
+          "file": "train.module-what-it-is-used-for.jsonl",
+          "records": 2,
+          "sha256": "fa43927aebff7d73d76d158538d45a76afc458d30c9db2b94a7ca55214d0592f"
+        },
+        {
+          "file": "train.what-it-is.jsonl",
+          "records": 16,
+          "sha256": "bb42395970b15b992cc53dc35a5a2f950bfb436ef74ce8d7f2a96217836ac060"
+        },
+        {
+          "file": "train.what-it-is-used-for.jsonl",
+          "records": 16,
+          "sha256": "5818befc8c18be62d1cb05b2e4d6abc2bc45fcac92c2c47555833a9d91073a47"
+        }
+      ]
+    },
+    "test": {
+      "files": [
+        {
+          "file": "test.module-what-it-is.jsonl",
+          "records": 1,
+          "sha256": "105940259fd8620d565200a5efa5fcdeca8212d635e80d2d3da35969a983dfd2"
+        },
+        {
+          "file": "test.module-what-it-is-used-for.jsonl",
+          "records": 1,
+          "sha256": "5586c237c2fd1dc57615a58e724e15ffef955c4319ba823fae0f2e05b2a3289d"
+        },
+        {
+          "file": "test.what-it-is.jsonl",
+          "records": 8,
+          "sha256": "a42e586a89d24f88965b3d64f6fdd34cb0477219e074b896c16caf9ce7d8fb3a"
+        },
+        {
+          "file": "test.what-it-is-used-for.jsonl",
+          "records": 8,
+          "sha256": "52bdcd0dbaaf1b0ed563017f84fe0f9ddb8aa54255ef67b8254742dae3920c52"
+        }
+      ]
+    }
+  }
+}

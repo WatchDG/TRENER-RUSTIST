@@ -1,0 +1,58 @@
+{
+  "format": "jolt-tasks",
+  "format_version": 1,
+  "name": "rust-std-module-cmp-0001",
+  "description": "Questions about the standard library module std::cmp in four formulations (module overview, then the non-experimental items of the module); answers are key phrases (answer_type phrase).",
+  "source": "https://doc.rust-lang.org/std/cmp/index.html",
+  "default_answer_type": "phrase",
+  "splits": {
+    "train": {
+      "files": [
+        {
+          "file": "train.module-what-it-is.jsonl",
+          "records": 2,
+          "sha256": "61dc9fd7c4946005b579ea7df85c4950766cca3a2c4700c08fd656b58171ef4b"
+        },
+        {
+          "file": "train.module-what-it-is-used-for.jsonl",
+          "records": 2,
+          "sha256": "76094178879e14c518c39a912812f24e08a9880c271bc3bc1a3ffcf9457fee91"
+        },
+        {
+          "file": "train.what-it-is.jsonl",
+          "records": 32,
+          "sha256": "e5e3d18700f3f721a465d3b16d3eb317dd53cb41cb2a6b723c4a2d2f28a80292"
+        },
+        {
+          "file": "train.what-it-is-used-for.jsonl",
+          "records": 32,
+          "sha256": "9b6076342d8e5a8cc3870a0c6116bf18967c96b1af8735ff1a84c418e2988c22"
+        }
+      ]
+    },
+    "test": {
+      "files": [
+        {
+          "file": "test.module-what-it-is.jsonl",
+          "records": 1,
+          "sha256": "a3cb1b979a375cec379a1d6adba312cbf2c971d3361baba9dfae34a61df2ed27"
+        },
+        {
+          "file": "test.module-what-it-is-used-for.jsonl",
+          "records": 1,
+          "sha256": "7285eff400f8af086cd0355b1c26050cffccf8230064b9c7ce0ee5f3141c99e8"
+        },
+        {
+          "file": "test.what-it-is.jsonl",
+          "records": 16,
+          "sha256": "6ced2289d9fecd07602202b1fb2cca5fb4c2df3324b8ba142a99543daba75fdb"
+        },
+        {
+          "file": "test.what-it-is-used-for.jsonl",
+          "records": 16,
+          "sha256": "cd018a99acf148b7392a630a9ffadc692b82438712d38fc4b84d237473c6ffd6"
+        }
+      ]
+    }
+  }
+}

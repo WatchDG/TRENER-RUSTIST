@@ -1,0 +1,53 @@
+# Preset: SFT stage on the cargo crate documentation of the datasets/rust/rust-cargo-* sets, before JOLT (docs/08-sft.md).
+# Corpora are prepared in advance (one folder per crate): python scripts/build_cargo_corpus.py
+# Epoch size in steps: python -m trener data validate-corpus datasets/rust-docs/rust-cargo-*-docs-0001 --config configs/sft_rust_cargo.yaml
+# Corpus: async-trait 0.1.92, bytes 1.12.1, serde 1.0.229, serde_json 1.0.154, tauri 2.12.5, tauri-plugin-dialog 2.8.4,
+# thiserror 2.0.21, tokio 1.54.1, uuid 1.29.0 — 3276 items, 15.3k documents, 0.90M loss tokens;
+# 8 rows of 4096 tokens per step — 297 rows, ~37 steps per epoch; 148 steps ≈ 4 epochs.
+run:
+  name: rust_cargo_docs_lfm3_sft
+  seed: 0
+  out_dir: runs
+  checkpoint_every_epochs: 1
+  release_cache: true
+  pinned_checkpoint: true
+method: sft
+model:
+  path: models/LFM3-1.7B
+  dtype: bfloat16
+  trust_remote_code: true
+  attn_implementation: sdpa
+  gradient_checkpointing: true
+  compile_kernels: true
+sft:
+  corpus:                 # each crate has its own corpus; an epoch covers all documents of all corpora
+    - datasets/rust-docs/rust-cargo-async-trait-docs-0001
+    - datasets/rust-docs/rust-cargo-bytes-docs-0001
+    - datasets/rust-docs/rust-cargo-serde-docs-0001
+    - datasets/rust-docs/rust-cargo-serde-json-docs-0001
+    - datasets/rust-docs/rust-cargo-tauri-docs-0001
+    - datasets/rust-docs/rust-cargo-tauri-plugin-dialog-docs-0001
+    - datasets/rust-docs/rust-cargo-thiserror-docs-0001
+    - datasets/rust-docs/rust-cargo-tokio-docs-0001
+    - datasets/rust-docs/rust-cargo-uuid-docs-0001
+  max_tokens: 4096
+  rows_per_step: 8
+  # replay against forgetting (prepared in advance: python -m trener data make-replay ...):
+  # replay: datasets/rust-docs/replay-lfm3
+  # replay_ratio: 0.15
+  eval_tasks: false
+optim:
+  lr: 2.0e-5               # 20x higher than JOLT: this stage adds new facts rather than reshaping the answer format
+  optimizer: adafactor
+  master_weights: true
+  max_grad_norm: 1.0
+  epochs: 5
+  schedule: cosine
+  warmup_steps: 8
+  master_storage: split
+eval:
+  every_epochs: 1                # NLL on the test split of the corpus, once per epoch
+  split: test
+  limit: 100
+  max_new_tokens: 1024
+  batch_mode: auto

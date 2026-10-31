@@ -1,0 +1,58 @@
+{
+  "format": "jolt-tasks",
+  "format_version": 1,
+  "name": "rust-std-module-vec-0001",
+  "description": "Questions about the standard library module std::vec in four formulations (module overview, then the non-experimental structs Vec, Drain, IntoIter, Splice and ExtractIf); answers are key phrases (answer_type phrase).",
+  "source": "https://doc.rust-lang.org/std/vec/index.html",
+  "default_answer_type": "phrase",
+  "splits": {
+    "train": {
+      "files": [
+        {
+          "file": "train.module-what-it-is.jsonl",
+          "records": 2,
+          "sha256": "0bd9207f3ce5258b1afdd9f3dacb58c1be7ee8e924b75674e6d0adf7228953e5"
+        },
+        {
+          "file": "train.module-what-it-is-used-for.jsonl",
+          "records": 2,
+          "sha256": "264429626eb5b5c5a576e0845e418917e05dc6e7ca3288f43919d613d99f721f"
+        },
+        {
+          "file": "train.what-it-is.jsonl",
+          "records": 10,
+          "sha256": "bf29581e96108bbb771efdbadc2dd9e6fd99da5c5c30834c682574b554d9088e"
+        },
+        {
+          "file": "train.what-it-is-used-for.jsonl",
+          "records": 10,
+          "sha256": "b8de3bf1b1d4bcb14cd6d3ce8b4d892b0aab0fdd692f724250d94dd9d4e71eb9"
+        }
+      ]
+    },
+    "test": {
+      "files": [
+        {
+          "file": "test.module-what-it-is.jsonl",
+          "records": 1,
+          "sha256": "a9097a34eae391e281da5287603e342dc588cdd0c1c7e6237b4e931181d21662"
+        },
+        {
+          "file": "test.module-what-it-is-used-for.jsonl",
+          "records": 1,
+          "sha256": "8d8def43a88dd65e0f9727ed0f60da4ba9fc487446655857e5b5925b6a98fa4f"
+        },
+        {
+          "file": "test.what-it-is.jsonl",
+          "records": 5,
+          "sha256": "1b30b48bb38fa237479730dd975032bf2e92e488dc54c8552416bf39967cf9ef"
+        },
+        {
+          "file": "test.what-it-is-used-for.jsonl",
+          "records": 5,
+          "sha256": "b8e77b0ebd135a2ef9de3acb0c9d9f0ae597ffbf755ca741900438478884b7dd"
+        }
+      ]
+    }
+  }
+}

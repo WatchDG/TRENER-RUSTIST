@@ -1,0 +1,48 @@
+{
+  "format": "jolt-tasks",
+  "format_version": 1,
+  "name": "rust-cargo-serde-0001",
+  "description": "",
+  "source": "",
+  "default_answer_type": "number",
+  "splits": {
+    "test": {
+      "files": [
+        {
+          "file": "test.caveats.jsonl",
+          "records": 14,
+          "sha256": "5c220c4d5d2a9aff9fe8bc6d0f3f2a4e41c7efdf01b1810ef5201756a57d91a8"
+        },
+        {
+          "file": "test.what-it-is.jsonl",
+          "records": 14,
+          "sha256": "10645bf429f5fbf2c3291a0afed1775cf5fab655cc34e7a9f9139d73ac100ee2"
+        },
+        {
+          "file": "test.when-to-use.jsonl",
+          "records": 14,
+          "sha256": "13ecf2ffca69b588f2564d8298e585a8a9dffe23344a83bd7552a087a9fe5a28"
+        }
+      ]
+    },
+    "train": {
+      "files": [
+        {
+          "file": "train.caveats.jsonl",
+          "records": 28,
+          "sha256": "597000f7467c5cd1a33b6c1756b6401dbaca503c602900f73425a65a3ffcb4f5"
+        },
+        {
+          "file": "train.what-it-is.jsonl",
+          "records": 28,
+          "sha256": "0e322460898584bd6e42d93574e1b0d1fb39e81241a66235f7feba1b328fffda"
+        },
+        {
+          "file": "train.when-to-use.jsonl",
+          "records": 28,
+          "sha256": "a527be52427d4f2554bf9006847cc4d2c5772e605e13b604c766232354a02140"
+        }
+      ]
+    }
+  }
+}

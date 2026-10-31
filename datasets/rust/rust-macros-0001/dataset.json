@@ -1,0 +1,48 @@
+{
+  "format": "jolt-tasks",
+  "format_version": 1,
+  "name": "rust-macros-0001",
+  "description": "Questions about standard-library macros in three mandatory formulations, one file per formulation and split; answers are key phrases (answer_type phrase).",
+  "source": "https://doc.rust-lang.org/std/index.html#macros",
+  "default_answer_type": "phrase",
+  "splits": {
+    "train": {
+      "files": [
+        {
+          "file": "train.what-it-does.jsonl",
+          "records": 78,
+          "sha256": "1ca6c57bc2b3866882dfbea8291039edb29aab215685781183854b7b0bb621f0"
+        },
+        {
+          "file": "train.what-it-is-used-for.jsonl",
+          "records": 78,
+          "sha256": "6141b40e9dc9f1daf812118fdbbf4451e496f68276c5e0bdbb7f9550cf711b3c"
+        },
+        {
+          "file": "train.what-happens-when-invoked.jsonl",
+          "records": 78,
+          "sha256": "df05e14cf5bb5d4e04f5590606fc5e71c3bbb880a9f4643127b0a6ca376dd6d8"
+        }
+      ]
+    },
+    "test": {
+      "files": [
+        {
+          "file": "test.what-it-does.jsonl",
+          "records": 39,
+          "sha256": "956803635ca3e2a110615ecebda2369c99d03f9342a4de85d9c069e97ec19cc4"
+        },
+        {
+          "file": "test.what-it-is-used-for.jsonl",
+          "records": 39,
+          "sha256": "e904980034371cfc40551a784f8edaba4f16c513710557c7846d355c84f2c829"
+        },
+        {
+          "file": "test.what-happens-when-invoked.jsonl",
+          "records": 39,
+          "sha256": "a461dee42083d42064443594de8cf4ba42888269da8f0b72238a4bb7f71f25e7"
+        }
+      ]
+    }
+  }
+}

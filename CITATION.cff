@@ -1,0 +1,37 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below, together with the JOLT paper it implements."
+title: "TRENER-RUSTIST: a JOLT / JOLT+ post-training pipeline"
+type: software
+authors:
+  - family-names: Baranov
+    given-names: Grigoriy
+version: 0.1.0
+date-released: "2026-10-31"
+license: Apache-2.0
+repository-code: "https://github.com/WatchDG/TRENER-RUSTIST"
+abstract: >-
+  Post-training pipeline for language models based on JOLT and JOLT+ (Joint On-policy
+  Learning and Teaching): self-distillation with privileged information, where one model
+  is trained jointly as a privileged teacher and an unprivileged student.
+keywords:
+  - JOLT
+  - on-policy distillation
+  - self-distillation
+  - reinforcement learning
+  - language models
+  - Rust
+references:
+  - type: article
+    title: "A Good Self-Teacher Meets the Student Where They Are: Joint On-Policy Learning and Teaching"
+    authors:
+      - family-names: Ardywibowo
+        given-names: Randy
+      - family-names: Dalal
+        given-names: Arnav
+      - family-names: Jiao
+        given-names: Jiantao
+    year: 2026
+    identifiers:
+      - type: other
+        value: "arXiv:2610.10447"
+    url: "https://arxiv.org/abs/2610.10447"

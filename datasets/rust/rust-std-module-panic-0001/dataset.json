@@ -1,0 +1,58 @@
+{
+  "format": "jolt-tasks",
+  "format_version": 1,
+  "name": "rust-std-module-panic-0001",
+  "description": "Questions about the standard library module std::panic in four formulations (module overview, then the non-experimental items of the module); answers are key phrases (answer_type phrase).",
+  "source": "https://doc.rust-lang.org/std/panic/index.html",
+  "default_answer_type": "phrase",
+  "splits": {
+    "train": {
+      "files": [
+        {
+          "file": "train.module-what-it-is.jsonl",
+          "records": 2,
+          "sha256": "de07dbabdc40189a944df308d540b4f84e8ed0eb31cd57479e294de7ba158091"
+        },
+        {
+          "file": "train.module-what-it-is-used-for.jsonl",
+          "records": 2,
+          "sha256": "1c4bbe3d3b052b3e9cc824eb21b504de4fe593878fabc46f3c037efd3c41e40d"
+        },
+        {
+          "file": "train.what-it-is.jsonl",
+          "records": 22,
+          "sha256": "abbd2c16f9ed559d3fac8b67c867311849780a7972b3186e6d9b5bbcfe6e04b2"
+        },
+        {
+          "file": "train.what-it-is-used-for.jsonl",
+          "records": 22,
+          "sha256": "96a1f0e1bcecd93ebcd3a97f94a75bcdd3a4e254fa3cbb8aa1abb219d0288b27"
+        }
+      ]
+    },
+    "test": {
+      "files": [
+        {
+          "file": "test.module-what-it-is.jsonl",
+          "records": 1,
+          "sha256": "96052b4c94448cba74b56d4936135c0e553e2978b8250ca5a9e4a9630e59ca90"
+        },
+        {
+          "file": "test.module-what-it-is-used-for.jsonl",
+          "records": 1,
+          "sha256": "3b3ffe5b0167a5609fee44d907e885cb2c8edb95b56c5a4129c9c35104fd8803"
+        },
+        {
+          "file": "test.what-it-is.jsonl",
+          "records": 11,
+          "sha256": "13c06beb8ac4d0d3ffdc63d26a0120c409c70016fd338d43b333f0f403bb1f25"
+        },
+        {
+          "file": "test.what-it-is-used-for.jsonl",
+          "records": 11,
+          "sha256": "c30303e3af978b52293bdb4d22eeb297c028dc921ccb5ace19b59a7ec45bee09"
+        }
+      ]
+    }
+  }
+}

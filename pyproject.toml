@@ -1,0 +1,58 @@
+# Project metadata and development tool configuration. The pipeline runs from the repository root
+# via `python -m trener`: paths in configs resolve against the repository root, so only an editable
+# install (`pip install -e .`) is supported. Dependencies are pinned in requirements*.txt.
+
+[build-system]
+requires = ["setuptools>=78.1"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "trener"
+dynamic = ["version", "dependencies", "optional-dependencies"]
+description = "Post-training pipeline for language models based on JOLT and JOLT+ (Joint On-policy Learning and Teaching)"
+readme = "README.md"
+requires-python = ">=3.13"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md"]
+authors = [{ name = "Baranov Grigoriy Vladimirovich" }]
+keywords = ["jolt", "on-policy distillation", "self-distillation", "reinforcement learning", "llm", "rust"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+[project.urls]
+Repository = "https://github.com/WatchDG/TRENER-RUSTIST"
+Documentation = "https://github.com/WatchDG/TRENER-RUSTIST/tree/main/docs"
+Changelog = "https://github.com/WatchDG/TRENER-RUSTIST/blob/main/CHANGELOG.md"
+Issues = "https://github.com/WatchDG/TRENER-RUSTIST/issues"
+
+[tool.setuptools]
+packages = ["trener"]
+
+[tool.setuptools.dynamic]
+version = { attr = "trener.__version__" }
+dependencies = { file = ["requirements.txt"] }
+optional-dependencies = { dev = { file = ["requirements-dev.txt"] } }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+markers = [
+    "slow: integration tests that execute a full pipeline step on a real model",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py313"
+src = ["trener", "tests"]
+extend-exclude = [".venv", "runs"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

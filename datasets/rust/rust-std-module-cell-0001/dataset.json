@@ -1,0 +1,58 @@
+{
+  "format": "jolt-tasks",
+  "format_version": 1,
+  "name": "rust-std-module-cell-0001",
+  "description": "Questions about the standard library module std::cell in four formulations (module overview, then the non-experimental items of the module); answers are key phrases (answer_type phrase).",
+  "source": "https://doc.rust-lang.org/std/cell/index.html",
+  "default_answer_type": "phrase",
+  "splits": {
+    "train": {
+      "files": [
+        {
+          "file": "train.module-what-it-is.jsonl",
+          "records": 2,
+          "sha256": "01eb0be5cd7421c0425ec9d7878a9d8cf17c3be152b6fa3b81896c966ae21c09"
+        },
+        {
+          "file": "train.module-what-it-is-used-for.jsonl",
+          "records": 2,
+          "sha256": "a1122912df0cade6ba3b26fed39d883de763e0f516af4f3dc5fa8381caf8eba1"
+        },
+        {
+          "file": "train.what-it-is.jsonl",
+          "records": 18,
+          "sha256": "146e0143dfb3f7276e6ab674d0ba87bd7f9ee9d32898890a27ec64ff2332c9cc"
+        },
+        {
+          "file": "train.what-it-is-used-for.jsonl",
+          "records": 18,
+          "sha256": "e5635a4dcf42bbf909ef0868e91e151e24d0db30f51ab5eca006fca7426cba17"
+        }
+      ]
+    },
+    "test": {
+      "files": [
+        {
+          "file": "test.module-what-it-is.jsonl",
+          "records": 1,
+          "sha256": "a82076665ffb5fe0d0190b93ad7f561d4c829e37359490c2c587a59b1a0666bc"
+        },
+        {
+          "file": "test.module-what-it-is-used-for.jsonl",
+          "records": 1,
+          "sha256": "aaba46b3a9266a3c1f5fc6a7c7b1c33b2813a020eebd85c79586aae1b74d7ddc"
+        },
+        {
+          "file": "test.what-it-is.jsonl",
+          "records": 9,
+          "sha256": "bbe7760f74b0da4bed794366f700c5f0915078051662248df116ac9b3b87ebae"
+        },
+        {
+          "file": "test.what-it-is-used-for.jsonl",
+          "records": 9,
+          "sha256": "7327759cc59f306ac025e32e644ba90ea70635315d007318dbdf05900db608c4"
+        }
+      ]
+    }
+  }
+}

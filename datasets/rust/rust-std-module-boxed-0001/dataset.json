@@ -1,0 +1,58 @@
+{
+  "format": "jolt-tasks",
+  "format_version": 1,
+  "name": "rust-std-module-boxed-0001",
+  "description": "Questions about the standard library module std::boxed in four formulations (module overview, then the non-experimental items of the module); answers are key phrases (answer_type phrase).",
+  "source": "https://doc.rust-lang.org/std/boxed/index.html",
+  "default_answer_type": "phrase",
+  "splits": {
+    "train": {
+      "files": [
+        {
+          "file": "train.module-what-it-is.jsonl",
+          "records": 2,
+          "sha256": "4723cbdde4d14bbd09d7d52c1571ad153a42971c6f786d3594fe9955d5497554"
+        },
+        {
+          "file": "train.module-what-it-is-used-for.jsonl",
+          "records": 2,
+          "sha256": "2a86a66f51690d83e5929598ceb5fcfdc57026c9cec94994d88a743978bd884d"
+        },
+        {
+          "file": "train.what-it-is.jsonl",
+          "records": 4,
+          "sha256": "242c456ace3461d39870e1957c7748282b8c2cade03931a4494283b7fe80dc1a"
+        },
+        {
+          "file": "train.what-it-is-used-for.jsonl",
+          "records": 4,
+          "sha256": "2a2ec8f31545b52d1b27751fc15dc1c46fae5249a19ddba389f76f0ddbc5cd86"
+        }
+      ]
+    },
+    "test": {
+      "files": [
+        {
+          "file": "test.module-what-it-is.jsonl",
+          "records": 1,
+          "sha256": "38cd69da43d73c7cb2a31c01b54e44e8c4848e76631bebaf66ff7c78cb701b0b"
+        },
+        {
+          "file": "test.module-what-it-is-used-for.jsonl",
+          "records": 1,
+          "sha256": "3ebb5e796949d746851134a921139b894590892094a34aae446e12ae5d88efb0"
+        },
+        {
+          "file": "test.what-it-is.jsonl",
+          "records": 2,
+          "sha256": "f3ec281422f72fd74ab3c8a028deee11660d3596501d0f73e87d35a0d18a3bc3"
+        },
+        {
+          "file": "test.what-it-is-used-for.jsonl",
+          "records": 2,
+          "sha256": "af387ca54523abaf2136058e116184dc6a553f56b446d7352cab56b020e6cff4"
+        }
+      ]
+    }
+  }
+}

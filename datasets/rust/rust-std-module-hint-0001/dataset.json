@@ -1,0 +1,58 @@
+{
+  "format": "jolt-tasks",
+  "format_version": 1,
+  "name": "rust-std-module-hint-0001",
+  "description": "Questions about the standard library module std::hint in four formulations (module overview, then the non-experimental items of the module); answers are key phrases (answer_type phrase).",
+  "source": "https://doc.rust-lang.org/std/hint/index.html",
+  "default_answer_type": "phrase",
+  "splits": {
+    "train": {
+      "files": [
+        {
+          "file": "train.module-what-it-is.jsonl",
+          "records": 2,
+          "sha256": "946b57e3b5e9aaa47da02d2cb3bf38b3edf132fc050393fc08900814b23116f7"
+        },
+        {
+          "file": "train.module-what-it-is-used-for.jsonl",
+          "records": 2,
+          "sha256": "65940ba2b5d3af55fd62a56b566c60a2e4d94388ac13b04cb953508b772a362e"
+        },
+        {
+          "file": "train.what-it-is.jsonl",
+          "records": 12,
+          "sha256": "d9fa0a7b1748affb2595bf17eb7277762b346583ec42a5b725d6bf0985aea99c"
+        },
+        {
+          "file": "train.what-it-is-used-for.jsonl",
+          "records": 12,
+          "sha256": "4334c763fbcf2e8c680875cdfb39dcc4c3afc701ea18c5121953bd50d0726048"
+        }
+      ]
+    },
+    "test": {
+      "files": [
+        {
+          "file": "test.module-what-it-is.jsonl",
+          "records": 1,
+          "sha256": "427f6459215fd25c3fe99c86ad6f0ccd0e06e2aa77a0be65454be9ceb9bf8e2f"
+        },
+        {
+          "file": "test.module-what-it-is-used-for.jsonl",
+          "records": 1,
+          "sha256": "bf7eea986bf1d3591820318e9f8f50ab1a8bb93412c57f40a4904a8819b4f409"
+        },
+        {
+          "file": "test.what-it-is.jsonl",
+          "records": 6,
+          "sha256": "4d67918d0d7e38ffcf05373f2dde698dcb7001b8955076a9344aeadcbcb82571"
+        },
+        {
+          "file": "test.what-it-is-used-for.jsonl",
+          "records": 6,
+          "sha256": "e1c78975fae384074441c5ae0464e2020bd6089042774dd5b8639a780648fc66"
+        }
+      ]
+    }
+  }
+}

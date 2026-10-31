@@ -1,0 +1,78 @@
+{
+  "format": "jolt-tasks",
+  "format_version": 1,
+  "name": "rust-traits-0001",
+  "description": "Questions about standard-library traits in six mandatory formulations, one file per formulation and split; answers are key phrases (answer_type phrase).",
+  "source": "https://doc.rust-lang.org/std/index.html#traits",
+  "default_answer_type": "phrase",
+  "splits": {
+    "train": {
+      "files": [
+        {
+          "file": "train.what-it-is.jsonl",
+          "records": 26,
+          "sha256": "3961833dbc242b23df1b5b02e37854cee346246cacee4fdd77505db1033791cc"
+        },
+        {
+          "file": "train.what-it-is-used-for.jsonl",
+          "records": 26,
+          "sha256": "33174a80f98066cbab3b5229349bd80cb355a7022517d964ab74b183f6adf04f"
+        },
+        {
+          "file": "train.what-it-enables.jsonl",
+          "records": 26,
+          "sha256": "d2fd3095c4e59b848fcd5fe1555e16fd64d697517c946b6ddd845a69667f0a0d"
+        },
+        {
+          "file": "train.when-to-implement.jsonl",
+          "records": 26,
+          "sha256": "db36e7643bf5b67f0ba8c0a0c3749f2457a8238d2e07cf14597c5cb422126544"
+        },
+        {
+          "file": "train.when-not-to-implement.jsonl",
+          "records": 26,
+          "sha256": "b3d6264d8a87acc203a92a882a865b763b6dc83ed6efc41a680d70002f4944dd"
+        },
+        {
+          "file": "train.dyn-usage.jsonl",
+          "records": 26,
+          "sha256": "9dc679eac3319858865ab69b64df478c83ad59b5aa0b487bfd4fab8b287f9e60"
+        }
+      ]
+    },
+    "test": {
+      "files": [
+        {
+          "file": "test.what-it-is.jsonl",
+          "records": 13,
+          "sha256": "7af8f07bc8db9b314ad69d25d234b815b96a407b7062756b51ce0057feb48f48"
+        },
+        {
+          "file": "test.what-it-is-used-for.jsonl",
+          "records": 13,
+          "sha256": "b060c97c2b5ae55f3a7b5dec6dae053404babb7b9296e43ba18b7abb0892a1d2"
+        },
+        {
+          "file": "test.what-it-enables.jsonl",
+          "records": 13,
+          "sha256": "a90b85ae8e98c33000b10a3036b9730a486db3a1cef8c6c3f425c59cbfbcfcd1"
+        },
+        {
+          "file": "test.when-to-implement.jsonl",
+          "records": 13,
+          "sha256": "0f0712bdc94cf1bab5f8ecedcc0c8b297064916ecac9af013f2214d1f5c18bf5"
+        },
+        {
+          "file": "test.when-not-to-implement.jsonl",
+          "records": 13,
+          "sha256": "f8101cf459b86b02a91785fd00753ee309e448f0bf3b860e33bb216d6fa9fdb6"
+        },
+        {
+          "file": "test.dyn-usage.jsonl",
+          "records": 13,
+          "sha256": "6c175a9e16fd6af406ca8aabab6b9013232f8c2733b66235869ba171120a4c30"
+        }
+      ]
+    }
+  }
+}

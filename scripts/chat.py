@@ -1,0 +1,50 @@
+"""Ask a question to a trained checkpoint: python scripts/chat.py runs/<run>/checkpoints/step-<N> "question"."""
+
+import argparse
+import sys
+from pathlib import Path
+
+import torch
+from safetensors.torch import load_file
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from trener.prompts import student_system_prompt  # noqa: E402
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("checkpoint", help="checkpoint directory with model.safetensors")
+    parser.add_argument("question", help="question text (for choice, the options go on separate lines)")
+    parser.add_argument("--base", default="models/LFM3-1.7B", help="source model directory (tokenizer and code)")
+    parser.add_argument("--answer-type", default="text", choices=["number", "text", "choice"])
+    parser.add_argument("--max-new-tokens", type=int, default=512)
+    parser.add_argument("--greedy", action="store_true", help="no sampling")
+    args = parser.parse_args()
+
+    tokenizer = AutoTokenizer.from_pretrained(args.base, trust_remote_code=True)
+    model = AutoModelForCausalLM.from_pretrained(args.base, torch_dtype=torch.bfloat16, trust_remote_code=True)
+    model.load_state_dict(load_file(str(Path(args.checkpoint) / "model.safetensors")), strict=False)
+    model.tie_weights()
+    model.to("cuda").eval()
+
+    messages = [
+        {"role": "system", "content": student_system_prompt(args.answer_type)},
+        {"role": "user", "content": args.question},
+    ]
+    inputs = tokenizer.apply_chat_template(
+        messages, add_generation_prompt=True, return_tensors="pt", return_dict=True
+    ).to("cuda")
+    with torch.no_grad():
+        out = model.generate(
+            **inputs,
+            max_new_tokens=args.max_new_tokens,
+            do_sample=not args.greedy,
+            temperature=None if args.greedy else 1.0,
+            top_p=None if args.greedy else 1.0,
+        )
+    print(tokenizer.decode(out[0, inputs["input_ids"].shape[1]:], skip_special_tokens=True))
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,58 @@
+{
+  "format": "jolt-tasks",
+  "format_version": 1,
+  "name": "rust-std-module-io-0001",
+  "description": "Questions about the standard library module std::io in four formulations (module overview, then the non-experimental prelude submodule, enums, functions, structs, traits and the Result type alias of the module); answers are key phrases (answer_type phrase).",
+  "source": "https://doc.rust-lang.org/std/io/index.html",
+  "default_answer_type": "phrase",
+  "splits": {
+    "train": {
+      "files": [
+        {
+          "file": "train.module-what-it-is.jsonl",
+          "records": 2,
+          "sha256": "3c249b3d541d71bba7a8f39d36b5f7925ae59a9024a138185c4837423a21d759"
+        },
+        {
+          "file": "train.module-what-it-is-used-for.jsonl",
+          "records": 2,
+          "sha256": "f55ccbd7aa6caf9b45ae233c6b6d1f11627f75a7794b4a4c564eba58bcf83439"
+        },
+        {
+          "file": "train.what-it-is.jsonl",
+          "records": 86,
+          "sha256": "0a2feb37acb79c9721d0e5eb25ce172fd3832e3cb38d6832514a51b0cec2f7bc"
+        },
+        {
+          "file": "train.what-it-is-used-for.jsonl",
+          "records": 86,
+          "sha256": "3ad9ef026a028655667197a2b65877ad8022f43ed0e0874b55fd7ce53fb43d29"
+        }
+      ]
+    },
+    "test": {
+      "files": [
+        {
+          "file": "test.module-what-it-is.jsonl",
+          "records": 1,
+          "sha256": "4d814d910c78811705beb729611a8abe3cb1889e03cd90140842c1e375bca59b"
+        },
+        {
+          "file": "test.module-what-it-is-used-for.jsonl",
+          "records": 1,
+          "sha256": "4f62283d9f7e09410bae262cc0d51de20a28416ad14ce0867c559c225de6409f"
+        },
+        {
+          "file": "test.what-it-is.jsonl",
+          "records": 43,
+          "sha256": "bfee2a8274464b413a3ea6835de052daf28d84f5f461309e46ec388044a9c991"
+        },
+        {
+          "file": "test.what-it-is-used-for.jsonl",
+          "records": 43,
+          "sha256": "51c38843327bdefe17a9b40ec27800c46c01fe263e7592105311c052e61e6a39"
+        }
+      ]
+    }
+  }
+}

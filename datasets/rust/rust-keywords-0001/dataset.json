@@ -1,0 +1,68 @@
+{
+  "format": "jolt-tasks",
+  "format_version": 1,
+  "name": "rust-keywords-0001",
+  "description": "Questions about Rust keywords in five mandatory formulations, one file per formulation and split; answers are key phrases (answer_type phrase).",
+  "source": "https://doc.rust-lang.org/core/index.html#keywords",
+  "default_answer_type": "phrase",
+  "splits": {
+    "train": {
+      "files": [
+        {
+          "file": "train.what-it-means.jsonl",
+          "records": 80,
+          "sha256": "dffda1ebf133a6fa8caf532c2f4a3064860451c161d13e943ddd4d67f4465150"
+        },
+        {
+          "file": "train.what-it-is-used-for.jsonl",
+          "records": 80,
+          "sha256": "07fa2da54c7c08412184d6fe5db85b6e40de0ec6caa155ac96edcd7e8b247f3b"
+        },
+        {
+          "file": "train.how-it-works.jsonl",
+          "records": 80,
+          "sha256": "3d192e0656b84f4a6a1bfafe2b7c1226d3174179770baf69a7e835f844737beb"
+        },
+        {
+          "file": "train.where-it-can-be-used.jsonl",
+          "records": 80,
+          "sha256": "7c60ad0d188eb38ecd96e7c035a4c16e8ea56158ad859ddaa6b86e44e972a705"
+        },
+        {
+          "file": "train.restrictions.jsonl",
+          "records": 80,
+          "sha256": "5915dcd2b1af300c13cd6f6f26ad220129ba5b8cce99458b7ae82a4b7a981a62"
+        }
+      ]
+    },
+    "test": {
+      "files": [
+        {
+          "file": "test.what-it-means.jsonl",
+          "records": 40,
+          "sha256": "00038edc81d02540d2221cd0d08c31782a510089d3794e268df25d8312c4f8a6"
+        },
+        {
+          "file": "test.what-it-is-used-for.jsonl",
+          "records": 40,
+          "sha256": "fd8c0f60ef2ed6e5eb46270b3c69242dbe522fc5a94dd8b70ba2597ed69e4231"
+        },
+        {
+          "file": "test.how-it-works.jsonl",
+          "records": 40,
+          "sha256": "f6a6331a3e68ee931706e90c81174d4462c2f15dfbc94ff374cc4c5e5a2103bb"
+        },
+        {
+          "file": "test.where-it-can-be-used.jsonl",
+          "records": 40,
+          "sha256": "06a9da4004010c1c039ea1d37a2b34eb1b063486dc7620cab9953a8541be10f9"
+        },
+        {
+          "file": "test.restrictions.jsonl",
+          "records": 40,
+          "sha256": "a2f2033a65c762e3d7a8e7da1f292a2079c7f040ed71769e48c21bb76397529d"
+        }
+      ]
+    }
+  }
+}

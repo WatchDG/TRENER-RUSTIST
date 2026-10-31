@@ -1,0 +1,58 @@
+{
+  "format": "jolt-tasks",
+  "format_version": 1,
+  "name": "rust-std-module-alloc-0001",
+  "description": "Questions about the standard library module std::alloc in four formulations (module overview, then the non-experimental items of the module); answers are key phrases (answer_type phrase).",
+  "source": "https://doc.rust-lang.org/std/alloc/index.html",
+  "default_answer_type": "phrase",
+  "splits": {
+    "train": {
+      "files": [
+        {
+          "file": "train.module-what-it-is.jsonl",
+          "records": 2,
+          "sha256": "b0039dd54bc7bc87ceec857f8a036edfe0a7017c5c2ba1aa4188609084279024"
+        },
+        {
+          "file": "train.module-what-it-is-used-for.jsonl",
+          "records": 2,
+          "sha256": "aa01c663ad09003987898dc9ec8608974258901ab8d381bcf0e67f37d4bfc7ee"
+        },
+        {
+          "file": "train.what-it-is.jsonl",
+          "records": 20,
+          "sha256": "963c8fd5e53867ae5ba78bb071c93fc9fafee88d5ce809ad72cbfaa3cfd1c216"
+        },
+        {
+          "file": "train.what-it-is-used-for.jsonl",
+          "records": 20,
+          "sha256": "5ae53bf74219d197922bf4b85374509daa869b507fddaeb8f127d5f171dcaccd"
+        }
+      ]
+    },
+    "test": {
+      "files": [
+        {
+          "file": "test.module-what-it-is.jsonl",
+          "records": 1,
+          "sha256": "4a79c0689744a86a964827dae9038d198f11f524d50121977114e26be2f32e46"
+        },
+        {
+          "file": "test.module-what-it-is-used-for.jsonl",
+          "records": 1,
+          "sha256": "00ef57903a60e7276e7aa05dbb0518b17aa3d492f49604b702e3f27932be4ca3"
+        },
+        {
+          "file": "test.what-it-is.jsonl",
+          "records": 10,
+          "sha256": "7adfa7b7155cf0e8793426f0ee36c82af336a5cd78e63dbb898903e4ab2669be"
+        },
+        {
+          "file": "test.what-it-is-used-for.jsonl",
+          "records": 10,
+          "sha256": "93636a4776ef12abc3679b57736ed04615a22c137ea79da1a08e111c9723635f"
+        }
+      ]
+    }
+  }
+}

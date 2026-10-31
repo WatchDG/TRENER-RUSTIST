@@ -1,0 +1,32 @@
+{
+  "format": "jolt-corpus",
+  "format_version": 1,
+  "name": "rust-cargo-tokio-docs-0001",
+  "description": "rustdoc JSON: tokio 1.54.1",
+  "source": "datasets/rust-docs/.rustdoc-target/doc",
+  "splits": {
+    "train": {
+      "files": [
+        {
+          "file": "train.text.jsonl",
+          "records": 1072,
+          "sha256": "7fd987e327ee50c86922a71e2953e9f2dfa34f5bd28f5d6e6e45df17ead8d2bf"
+        },
+        {
+          "file": "train.qa.jsonl",
+          "records": 4041,
+          "sha256": "a4d8b22466752930e9320a7b21b78b8c2b205e62ef80629f9fa14817bcb21b78"
+        }
+      ]
+    },
+    "test": {
+      "files": [
+        {
+          "file": "test.qa.jsonl",
+          "records": 61,
+          "sha256": "36b4da56822aed3726341cfc5ad4c43d2f84cae0046475bfd02372aeb59de7f2"
+        }
+      ]
+    }
+  }
+}

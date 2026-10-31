@@ -1,0 +1,49 @@
+# Preset: JOLT on dataset datasets/rust/rust-std-module-prelude-0001 (module std::prelude, four phrasings, answer_type phrase, docs/06-data.md).
+# 24 tasks in train: B=8 gives 3 steps per epoch, 6 steps ≈ 2 epochs; test has 12 tasks, so eval.limit covers the whole test set.
+run:
+  name: rust_std_prelude_lfm3_jolt
+  seed: 0
+  out_dir: runs
+  checkpoint_every_epochs: 2
+  release_cache: true      # return allocator cache at phase boundaries: VRAM reserve 20.3 → 17.5 GB (+1% step time)
+  pinned_checkpoint: true  # checkpoint snapshot via pinned RAM: main thread stalls ~0.05 s instead of 1–3 s
+method: jolt
+model:
+  path: models/LFM3-1.7B
+  dtype: bfloat16
+  trust_remote_code: true
+  attn_implementation: sdpa
+  gradient_checkpointing: true
+  compile_kernels: true
+task:
+  dataset: datasets/rust/rust-std-module-prelude-0001
+  privileged: reference_answer
+rollout:
+  group_size: 4
+  batch_size: 8
+  temperature: 1.0
+  top_p: 1.0
+  top_k: 0
+  repetition_penalty: 1.0
+  engine: static
+  micro_batch_tokens: 4096
+  max_new_tokens: 768
+  micro_batch_size: 16
+  generation_batch_size: 64
+optim:
+  lr: 1.0e-6
+  beta_teacher_kl: 0.03
+  beta_student_distill: 0.1
+  optimizer: adafactor
+  master_weights: true
+  max_grad_norm: 1.0
+  epochs: 5
+  schedule: constant
+  warmup_steps: 1
+  master_storage: split    # master = bf16 weights + int16 low halves: bit-identical to the fp32 master, peak VRAM −3.2 GB
+eval:
+  every: 20
+  split: test
+  limit: 12
+  max_new_tokens: 768
+  batch_mode: auto  # eval.batch_size = min(test size, eval.limit, 128), set when the config is loaded

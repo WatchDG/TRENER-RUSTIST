@@ -1,0 +1,21 @@
+{
+  "format": "jolt-tasks",
+  "format_version": 1,
+  "name": "reverse-rust-0001",
+  "description": "Rust, режим тьютора: модель задаёт вопрос по теме, получает ответ пользователя (верный или неверный) и оценивает его; при ошибке явно сообщает об этом и называет правильный ответ. Записи на английском и русском (meta.lang)",
+  "source": "https://doc.rust-lang.org/std/marker/trait.Sized.html; https://doc.rust-lang.org/std/clone/trait.Clone.html; https://doc.rust-lang.org/std/marker/trait.Copy.html; https://doc.rust-lang.org/std/fmt/trait.Debug.html; https://doc.rust-lang.org/std/cmp/trait.PartialEq.html; https://doc.rust-lang.org/std/cmp/trait.PartialOrd.html; https://doc.rust-lang.org/std/cmp/trait.Eq.html; https://doc.rust-lang.org/std/cmp/trait.Ord.html; https://doc.rust-lang.org/std/hash/trait.Hash.html; https://doc.rust-lang.org/std/convert/trait.AsRef.html; https://doc.rust-lang.org/std/convert/trait.AsMut.html; https://doc.rust-lang.org/std/borrow/trait.Borrow.html; https://doc.rust-lang.org/std/borrow/trait.BorrowMut.html; https://doc.rust-lang.org/std/iter/trait.Iterator.html; https://doc.rust-lang.org/std/iter/trait.IntoIterator.html; https://doc.rust-lang.org/std/primitive.array.html; https://doc.rust-lang.org/std/primitive.bool.html; https://doc.rust-lang.org/std/primitive.char.html; https://doc.rust-lang.org/std/primitive.f32.html; https://doc.rust-lang.org/std/primitive.f64.html; https://doc.rust-lang.org/std/primitive.unit.html; https://doc.rust-lang.org/std/primitive.i8.html; https://doc.rust-lang.org/std/primitive.i16.html; https://doc.rust-lang.org/std/primitive.i32.html; https://doc.rust-lang.org/std/primitive.i64.html; https://doc.rust-lang.org/std/primitive.i128.html; https://doc.rust-lang.org/std/primitive.isize.html; https://doc.rust-lang.org/std/primitive.u8.html; https://doc.rust-lang.org/std/primitive.u16.html; https://doc.rust-lang.org/std/primitive.u32.html; https://doc.rust-lang.org/std/primitive.u64.html; https://doc.rust-lang.org/std/primitive.u128.html; https://doc.rust-lang.org/std/primitive.usize.html; https://doc.rust-lang.org/std/primitive.fn.html; https://doc.rust-lang.org/std/primitive.pointer.html; https://doc.rust-lang.org/std/primitive.reference.html; https://doc.rust-lang.org/std/primitive.slice.html; https://doc.rust-lang.org/std/primitive.str.html; https://doc.rust-lang.org/std/primitive.tuple.html; https://doc.rust-lang.org/std/default/trait.Default.html; https://doc.rust-lang.org/std/convert/trait.From.html; https://doc.rust-lang.org/std/marker/trait.Send.html; https://doc.rust-lang.org/std/marker/trait.Sync.html; https://doc.rust-lang.org/std/marker/trait.Unpin.html; https://doc.rust-lang.org/std/panic/trait.UnwindSafe.html; https://doc.rust-lang.org/std/panic/trait.RefUnwindSafe.html; https://doc.rust-lang.org/core/keyword.Self.html; https://doc.rust-lang.org/core/keyword.as.html; https://doc.rust-lang.org/core/keyword.break.html; https://doc.rust-lang.org/core/keyword.const.html; https://doc.rust-lang.org/core/keyword.crate.html; https://doc.rust-lang.org/core/keyword.dyn.html; https://doc.rust-lang.org/core/keyword.fn.html; https://doc.rust-lang.org/core/keyword.for.html; https://doc.rust-lang.org/core/keyword.impl.html; https://doc.rust-lang.org/core/keyword.let.html; https://doc.rust-lang.org/core/keyword.in.html; https://doc.rust-lang.org/core/keyword.self.html; https://doc.rust-lang.org/core/keyword.mut.html; https://doc.rust-lang.org/core/keyword.return.html; https://doc.rust-lang.org/core/keyword.trait.html; https://doc.rust-lang.org/core/keyword.where.html; https://doc.rust-lang.org/core/keyword.while.html",
+  "default_answer_type": "number",
+  "mode": "tutor",
+  "splits": {
+    "train": {
+      "file": "train.jsonl",
+      "records": 584,
+      "sha256": "3cac6eae1640256b5e4cf21c3d79a8fd08421adeb5ce8b4a958488b0eff46b87"
+    },
+    "test": {
+      "file": "test.jsonl",
+      "records": 336,
+      "sha256": "14c1a084d385e54905decba1eaa188b980a675393d30f224853c1a2af03abf18"
+    }
+  }
+}

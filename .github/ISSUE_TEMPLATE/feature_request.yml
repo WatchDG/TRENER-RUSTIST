@@ -1,0 +1,18 @@
+name: Feature request
+description: A new option, preset, dataset or pipeline stage
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What you are trying to do and why the current pipeline does not cover it.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: The change you suggest. Note if it touches the method's math (docs/01-jolt.md, docs/02-algorithm.md).
+    validations:
+      required: true

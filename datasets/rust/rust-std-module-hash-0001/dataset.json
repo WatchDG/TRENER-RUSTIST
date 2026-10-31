@@ -1,0 +1,58 @@
+{
+  "format": "jolt-tasks",
+  "format_version": 1,
+  "name": "rust-std-module-hash-0001",
+  "description": "Questions about the standard library module std::hash in four formulations (module overview, then the non-experimental items of the module); answers are key phrases (answer_type phrase).",
+  "source": "https://doc.rust-lang.org/std/hash/index.html",
+  "default_answer_type": "phrase",
+  "splits": {
+    "train": {
+      "files": [
+        {
+          "file": "train.module-what-it-is.jsonl",
+          "records": 2,
+          "sha256": "c2848b0e5089a4ab62665236597d34be59ab8057c986f8f6ad449f678846e53f"
+        },
+        {
+          "file": "train.module-what-it-is-used-for.jsonl",
+          "records": 2,
+          "sha256": "16922b35d549bd4afc430b5dfd98e521d69bf5d47cff1dc073a1ce317ab3d527"
+        },
+        {
+          "file": "train.what-it-is.jsonl",
+          "records": 16,
+          "sha256": "923159c9751dcfbbc0b8889ebfe84658e8dc2150cc60e1c5e196948fbc040195"
+        },
+        {
+          "file": "train.what-it-is-used-for.jsonl",
+          "records": 16,
+          "sha256": "dc71e203d3ca2eaf18f584d0674c3be1763ff81026c1e3db918ce1d960fe6cc4"
+        }
+      ]
+    },
+    "test": {
+      "files": [
+        {
+          "file": "test.module-what-it-is.jsonl",
+          "records": 1,
+          "sha256": "055797a601e5bba96a4e4d2dffc1911d3b3f074562249cf07871b663524e3b32"
+        },
+        {
+          "file": "test.module-what-it-is-used-for.jsonl",
+          "records": 1,
+          "sha256": "d2d4f3de4dd57b3ae4611a4b59972ae294ddcaf3dfaecbd50c26315fada49b1a"
+        },
+        {
+          "file": "test.what-it-is.jsonl",
+          "records": 8,
+          "sha256": "19b105237be761d34ed0485cba08c8667efce2ce2166897898f96d5b7c7842f4"
+        },
+        {
+          "file": "test.what-it-is-used-for.jsonl",
+          "records": 8,
+          "sha256": "c8ae0b86771b42d3407a3e58499b4ccaf000ba221f9de04e19c1850f579f854c"
+        }
+      ]
+    }
+  }
+}

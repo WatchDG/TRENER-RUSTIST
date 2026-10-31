@@ -1,0 +1,58 @@
+{
+  "format": "jolt-tasks",
+  "format_version": 1,
+  "name": "rust-std-module-pin-0001",
+  "description": "Questions about the standard library module std::pin in four formulations (module overview, then the non-experimental items of the module); answers are key phrases (answer_type phrase).",
+  "source": "https://doc.rust-lang.org/std/pin/index.html",
+  "default_answer_type": "phrase",
+  "splits": {
+    "train": {
+      "files": [
+        {
+          "file": "train.module-what-it-is.jsonl",
+          "records": 2,
+          "sha256": "b026e42ad2e326f2845595bdbcb4ff68d1afa02f1af300abc8061efad26b6fdb"
+        },
+        {
+          "file": "train.module-what-it-is-used-for.jsonl",
+          "records": 2,
+          "sha256": "f0323dd1b0aba3781d4003d7f527f0d1c6ed17b8e1937981f87f12387219ee92"
+        },
+        {
+          "file": "train.what-it-is.jsonl",
+          "records": 4,
+          "sha256": "dff488acf24b7e0c9ef0c7e522918ffcd81213ed6f88822fb9d01246e6cf4bf9"
+        },
+        {
+          "file": "train.what-it-is-used-for.jsonl",
+          "records": 4,
+          "sha256": "0d5f7286e13ccb8ae9ea38822fd280578cbe026e676d7119d09248da59bdacb8"
+        }
+      ]
+    },
+    "test": {
+      "files": [
+        {
+          "file": "test.module-what-it-is.jsonl",
+          "records": 1,
+          "sha256": "14c86009362264c84efa3d980f98d09df65ec670004fd41dc68a2058291e63be"
+        },
+        {
+          "file": "test.module-what-it-is-used-for.jsonl",
+          "records": 1,
+          "sha256": "014491f93744f73bac52ade73b864732fa1e4bde6ccf58b6df6d916785a335eb"
+        },
+        {
+          "file": "test.what-it-is.jsonl",
+          "records": 2,
+          "sha256": "7557fb1a7df93f29d81d200210875451d18e46c37421f6f13f35196a619db500"
+        },
+        {
+          "file": "test.what-it-is-used-for.jsonl",
+          "records": 2,
+          "sha256": "b92832dfe1c90d2073359a2ba587e83fa60040ae70d1e1c0436faffff6c0f1c2"
+        }
+      ]
+    }
+  }
+}

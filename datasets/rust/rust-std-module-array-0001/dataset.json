@@ -1,0 +1,58 @@
+{
+  "format": "jolt-tasks",
+  "format_version": 1,
+  "name": "rust-std-module-array-0001",
+  "description": "Questions about the standard library module std::array in four formulations (module overview, then the non-experimental items of the module); answers are key phrases (answer_type phrase).",
+  "source": "https://doc.rust-lang.org/std/array/index.html",
+  "default_answer_type": "phrase",
+  "splits": {
+    "train": {
+      "files": [
+        {
+          "file": "train.module-what-it-is.jsonl",
+          "records": 2,
+          "sha256": "85a969ff0107d1f2585d57b6b2f9ec1da3d4840390162aa15fcfa7bfa2104c6b"
+        },
+        {
+          "file": "train.module-what-it-is-used-for.jsonl",
+          "records": 2,
+          "sha256": "04df9dafe3ece8756f8d5925d9aeaaae8048c7fa723c9cbff3c573386e2c741f"
+        },
+        {
+          "file": "train.what-it-is.jsonl",
+          "records": 12,
+          "sha256": "15ff342b79e53e937345b8782737ea9cfd6fd4985a94f6963c87910c316067fc"
+        },
+        {
+          "file": "train.what-it-is-used-for.jsonl",
+          "records": 12,
+          "sha256": "d46cecfd1e09fa9d138478a031247afbcbe0c20c27025c6bca16f26174b392d2"
+        }
+      ]
+    },
+    "test": {
+      "files": [
+        {
+          "file": "test.module-what-it-is.jsonl",
+          "records": 1,
+          "sha256": "6a7cd9376159b62053fb0554dcb00af2f893ccf31b3fa0d561e3d82c5572375d"
+        },
+        {
+          "file": "test.module-what-it-is-used-for.jsonl",
+          "records": 1,
+          "sha256": "9e1ba16d8949625037ffea6eee940c68a0253edad0447047ef3dd2578623585b"
+        },
+        {
+          "file": "test.what-it-is.jsonl",
+          "records": 6,
+          "sha256": "411dd7fc5c5eb23b0531e11bd143299e1892a57ed85bb3f0140c47053bbfd46a"
+        },
+        {
+          "file": "test.what-it-is-used-for.jsonl",
+          "records": 6,
+          "sha256": "3b8e4960b064725b028e1c7b1e125feb61ad44eee1b7095b3dbbaf6074c5a44d"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,56 @@
+# Changelog
+
+All notable changes to this project are documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+## [0.1.0] - 2026-10-31
+
+First release.
+
+### Added
+
+- The `trener` pipeline for JOLT and JOLT+ (`python -m trener`: `train`, `eval`,
+  `bench`, `summarize`, `sequence`, `data`), the `sft` stage on documentation
+  corpora, presets in `configs/`, task sets and corpora in `datasets/`, and the
+  documentation in `docs/`.
+- CI (`.github/workflows/ci.yml`): `ruff check` and the CPU part of the test
+  suite on every push to `main` and every pull request.
+- `THIRD_PARTY_NOTICES.md`: sources, versions and licenses of the documentation
+  the datasets are derived from.
+- README: requirements, quickstart and repository layout.
+- `SECURITY.md`, `CITATION.cff`, issue and pull request templates.
+- `pyproject.toml` project metadata (`[project]`); version, dependencies and the
+  `dev` extra are read from `trener.__version__` and the requirements files.
+- `requirements-dev.txt`: test and lint tools (pytest, ruff), moved out of
+  `requirements.txt`.
+- `scripts/data/reverse_rust_0001.json`: the source records of
+  `reverse-rust-0001`, moved out of `scripts/make_reverse_rust_0001.py`; the
+  generated dataset is unchanged.
+- Run length, warmup, checkpoint and evaluation interval can be set in whole
+  epochs: `optim.epochs`, `optim.warmup_epochs`, `run.checkpoint_every_epochs`,
+  `eval.every_epochs`. They are resolved to steps once the dataset is loaded
+  (`trener/schedule.py`); steps stay the default (`optim.steps`,
+  `optim.warmup_steps`, `run.checkpoint_every`, `eval.every`). A value in epochs
+  replaces its step twin, `--set` of one field of a pair clears the other, and
+  the resolution is recorded in `env.json` (`schedule`).
+- `LICENSE` (Apache-2.0), `NOTICE`, `CONTRIBUTING.md` and this changelog.
+
+### Changed
+
+- All presets in `configs/` (except `smoke_*`) train for 5 epochs.
+- `bench` and `scripts/measure_memory.py` take the run length from `--steps`,
+  regardless of `optim.epochs`.
+
+### Fixed
+
+- Dataset READMEs in `datasets/rust/` are translated to English, and their
+  commands use `python -m trener` instead of the old module name.
+- Tests that need the LFM3 tokenizer are skipped when `models/LFM3-1.7B` is
+  absent instead of failing.
+
+[Unreleased]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/WatchDG/TRENER-RUSTIST/releases/tag/v0.1.0

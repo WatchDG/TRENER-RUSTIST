@@ -1,0 +1,58 @@
+{
+  "format": "jolt-tasks",
+  "format_version": 1,
+  "name": "rust-std-module-primitive-0001",
+  "description": "Questions about the standard library module std::primitive in four formulations (module overview, then the non-experimental items of the module); answers are key phrases (answer_type phrase).",
+  "source": "https://doc.rust-lang.org/std/primitive/index.html",
+  "default_answer_type": "phrase",
+  "splits": {
+    "train": {
+      "files": [
+        {
+          "file": "train.module-what-it-is.jsonl",
+          "records": 2,
+          "sha256": "8db4deda6cffc1cdf1f747e2b51ebdfd5aa480589bc27cf28bc73ac45a07c530"
+        },
+        {
+          "file": "train.module-what-it-is-used-for.jsonl",
+          "records": 2,
+          "sha256": "e06e51a9264828809273edeba60b145ab3f03d03f8579458af46d284dbe5482c"
+        },
+        {
+          "file": "train.what-it-is.jsonl",
+          "records": 34,
+          "sha256": "0ce5e7a4805db7a84a4d789f475137a9e422cd54f33359f530f88bc304fee481"
+        },
+        {
+          "file": "train.what-it-is-used-for.jsonl",
+          "records": 34,
+          "sha256": "8de04687514ba864f9391ac271ade1453126bdbc850890d28123a01e2d8bba74"
+        }
+      ]
+    },
+    "test": {
+      "files": [
+        {
+          "file": "test.module-what-it-is.jsonl",
+          "records": 1,
+          "sha256": "9b019b528339cdddc8eef245a17c1244ca467e5571a8ba32ba12912dacb3db83"
+        },
+        {
+          "file": "test.module-what-it-is-used-for.jsonl",
+          "records": 1,
+          "sha256": "1ae0244c25afe5bc178d6c5c40d09300995b9ce3e444ce682422aa81a7c2d1c5"
+        },
+        {
+          "file": "test.what-it-is.jsonl",
+          "records": 17,
+          "sha256": "7735d7256b368167b505af8cae3c57aab89cc9d93abaa25b2908203bdd374d30"
+        },
+        {
+          "file": "test.what-it-is-used-for.jsonl",
+          "records": 17,
+          "sha256": "7e463c794c26795f74711019e35c0e2123e5d0e3a3fb377f86178a53ecf8cf8d"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,58 @@
+{
+  "format": "jolt-tasks",
+  "format_version": 1,
+  "name": "rust-std-module-net-0001",
+  "description": "Questions about the standard library module std::net in four formulations (module overview, then the non-experimental items of the module); answers are key phrases (answer_type phrase).",
+  "source": "https://doc.rust-lang.org/std/net/index.html",
+  "default_answer_type": "phrase",
+  "splits": {
+    "train": {
+      "files": [
+        {
+          "file": "train.module-what-it-is.jsonl",
+          "records": 2,
+          "sha256": "92ec1ac71c816cbb3c9b1d746fb81121e812ab19fd09dd6b6c7680bd4554b8c3"
+        },
+        {
+          "file": "train.module-what-it-is-used-for.jsonl",
+          "records": 2,
+          "sha256": "767e58e5875718155dd4a810c24eb3d0f67ef1281743dcab9f8ec755df58e5a2"
+        },
+        {
+          "file": "train.what-it-is.jsonl",
+          "records": 26,
+          "sha256": "f68bc55c60c45c328ef2763f42f8025263ed36a90f1b5e04b76751ec4bd59c74"
+        },
+        {
+          "file": "train.what-it-is-used-for.jsonl",
+          "records": 26,
+          "sha256": "7615e4d324dc868de1dee79a98a777a03ce0e3f4998ed6b979a5502a7a3bcfe8"
+        }
+      ]
+    },
+    "test": {
+      "files": [
+        {
+          "file": "test.module-what-it-is.jsonl",
+          "records": 1,
+          "sha256": "926b93015fc03f53bbddaa150529a61f7929c7390e542dd2c24e7cecbea74515"
+        },
+        {
+          "file": "test.module-what-it-is-used-for.jsonl",
+          "records": 1,
+          "sha256": "d0825aaf9a30df6179b39702f133663e2bb814ecaa23c451410a1ae811ed0fc3"
+        },
+        {
+          "file": "test.what-it-is.jsonl",
+          "records": 13,
+          "sha256": "1a0becd77177449d356fec3ee8074fba94b60200244584b904132ea41928f6cf"
+        },
+        {
+          "file": "test.what-it-is-used-for.jsonl",
+          "records": 13,
+          "sha256": "ab3aa1af72bd9ebdce73d38596f3739ad6f0d8a7473cb40e00f01f372f17e02a"
+        }
+      ]
+    }
+  }
+}

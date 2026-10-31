@@ -1,0 +1,58 @@
+{
+  "format": "jolt-tasks",
+  "format_version": 1,
+  "name": "rust-std-module-prelude-0001",
+  "description": "Questions about the standard library module std::prelude in four formulations (module overview, then the non-experimental items of the module); answers are key phrases (answer_type phrase).",
+  "source": "https://doc.rust-lang.org/std/prelude/index.html",
+  "default_answer_type": "phrase",
+  "splits": {
+    "train": {
+      "files": [
+        {
+          "file": "train.module-what-it-is.jsonl",
+          "records": 2,
+          "sha256": "2cf53fad17746180ecf54c3345f132a998acf614fc6317af66e3dce4f7f2dcc1"
+        },
+        {
+          "file": "train.module-what-it-is-used-for.jsonl",
+          "records": 2,
+          "sha256": "21fbce2c6eb93ad0d9b82a58ff40fa51a529a1ca3b27e07b280e5370ca377eac"
+        },
+        {
+          "file": "train.what-it-is.jsonl",
+          "records": 10,
+          "sha256": "d14f1cf0f7d42bb0c93a3a6ef954f4aaca32d09dd00c2c6b69c8c491f59edeea"
+        },
+        {
+          "file": "train.what-it-is-used-for.jsonl",
+          "records": 10,
+          "sha256": "418e4ed705158c594750e0b46297826c4c2eb22dde249300597babe779973517"
+        }
+      ]
+    },
+    "test": {
+      "files": [
+        {
+          "file": "test.module-what-it-is.jsonl",
+          "records": 1,
+          "sha256": "a3db99b916bde546eeba8a4b2db9fbe024c3d51fb44ffeffb19e6e0c55d6d1f9"
+        },
+        {
+          "file": "test.module-what-it-is-used-for.jsonl",
+          "records": 1,
+          "sha256": "c74fa6fa2b32bf853e663ce8331ecf7c0b5c36aaee4d93bd3bb1e299e1f9aa76"
+        },
+        {
+          "file": "test.what-it-is.jsonl",
+          "records": 5,
+          "sha256": "202a8eb760001f12bf03283b04f0d76ff5791e34a76742618b4fe365d16918e6"
+        },
+        {
+          "file": "test.what-it-is-used-for.jsonl",
+          "records": 5,
+          "sha256": "fc86d205e199dbf413d5131ce7f32874578abe7c84852ca7a82ff02510eae199"
+        }
+      ]
+    }
+  }
+}

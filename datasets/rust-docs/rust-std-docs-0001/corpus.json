@@ -1,0 +1,32 @@
+{
+  "format": "jolt-corpus",
+  "format_version": 1,
+  "name": "rust-std-docs-0001",
+  "description": "rustdoc JSON: std 1.101.0-nightly\t(41089d07a\t2026-10-27)",
+  "source": "<external>/doc/rust/json",
+  "splits": {
+    "train": {
+      "files": [
+        {
+          "file": "train.text.jsonl",
+          "records": 4795,
+          "sha256": "f29f87b7691ed01bf34b9863c04708373f661810cd3a46e5439a40b0ec4c3dc3"
+        },
+        {
+          "file": "train.qa.jsonl",
+          "records": 24122,
+          "sha256": "0e944c9c528a89fe1b2a876ceb326d14f3df733b6441ee946a66a8ff29cae90a"
+        }
+      ]
+    },
+    "test": {
+      "files": [
+        {
+          "file": "test.qa.jsonl",
+          "records": 246,
+          "sha256": "aa6649a38060e3bb3102fb960de0a5d0d923476c539dc031cab69649f4109d97"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,58 @@
+{
+  "format": "jolt-tasks",
+  "format_version": 1,
+  "name": "rust-std-module-thread-0001",
+  "description": "Questions about the standard library module std::thread in four formulations (module overview, then the non-experimental structs, functions and the Result type alias); answers are key phrases (answer_type phrase).",
+  "source": "https://doc.rust-lang.org/std/thread/index.html",
+  "default_answer_type": "phrase",
+  "splits": {
+    "train": {
+      "files": [
+        {
+          "file": "train.module-what-it-is.jsonl",
+          "records": 2,
+          "sha256": "fa4e8b0967ede40a609e77669556d42f65de730580dbd735ea4013bd9d399bd7"
+        },
+        {
+          "file": "train.module-what-it-is-used-for.jsonl",
+          "records": 2,
+          "sha256": "df274c39f4976b4e1b57f880f7d1a68ccd54d289e3e6ad97c84bfcff214da23d"
+        },
+        {
+          "file": "train.what-it-is.jsonl",
+          "records": 40,
+          "sha256": "f05b02cf1cedbaa4017f6aa4155b165b4a0a2102e45eaa88708ec0249128b17a"
+        },
+        {
+          "file": "train.what-it-is-used-for.jsonl",
+          "records": 40,
+          "sha256": "d38a6e2e5a16b654311545f4f43c015d6808704e579f48c4e7f1638c11eb73c6"
+        }
+      ]
+    },
+    "test": {
+      "files": [
+        {
+          "file": "test.module-what-it-is.jsonl",
+          "records": 1,
+          "sha256": "c459446d981df086c6770378fa570d2a3d99afc8bbc7235a4a7fa9597bbd66d3"
+        },
+        {
+          "file": "test.module-what-it-is-used-for.jsonl",
+          "records": 1,
+          "sha256": "ea96b68580402be6fe61cbf289d57fd12720a983f70b278af98e1dabb6995c05"
+        },
+        {
+          "file": "test.what-it-is.jsonl",
+          "records": 20,
+          "sha256": "1d5fbced4d7522e960456806e03b0afde1aba7d650ec5eee7661eef11de8dbdd"
+        },
+        {
+          "file": "test.what-it-is-used-for.jsonl",
+          "records": 20,
+          "sha256": "9cbe003dde2cf038b8d7319888344e8d3b267b0fad75842bff520c628ab6700d"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "format": "jolt-corpus",
+  "format_version": 1,
+  "name": "rust-cargo-serde-json-docs-0001",
+  "description": "rustdoc JSON: serde_json 1.0.154",
+  "source": "datasets/rust-docs/.rustdoc-target/doc",
+  "splits": {
+    "train": {
+      "files": [
+        {
+          "file": "train.text.jsonl",
+          "records": 184,
+          "sha256": "5cc9413009a75bb024473ead62fdb11497ccd33b782b9a8aeecd2264371119bd"
+        },
+        {
+          "file": "train.qa.jsonl",
+          "records": 677,
+          "sha256": "a87d906d8c3abb0ab86148a0fda8d075440bd7a1a7e3f5a7126b0af00246ace7"
+        }
+      ]
+    },
+    "test": {
+      "files": [
+        {
+          "file": "test.qa.jsonl",
+          "records": 8,
+          "sha256": "6c2c63f4ad49a7ab6e9f6b249ba91fd6ba83bb0a55d401ee4e594b56f66d7b76"
+        }
+      ]
+    }
+  }
+}

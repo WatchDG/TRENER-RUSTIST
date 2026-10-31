@@ -1,0 +1,23 @@
+{
+  "format": "jolt-corpus",
+  "format_version": 1,
+  "name": "rust-cargo-thiserror-docs-0001",
+  "description": "rustdoc JSON: thiserror 2.0.21",
+  "source": "datasets/rust-docs/.rustdoc-target/doc",
+  "splits": {
+    "train": {
+      "files": [
+        {
+          "file": "train.text.jsonl",
+          "records": 2,
+          "sha256": "b6673b86f5a3353c503e484ef576334095e5cc854d27a52097bd16a41dfcd972"
+        },
+        {
+          "file": "train.qa.jsonl",
+          "records": 5,
+          "sha256": "694bdc946e93240dae04ac75f84bbdd3d21c4ac79f2ee5f4db8e76c6e9fd0652"
+        }
+      ]
+    }
+  }
+}

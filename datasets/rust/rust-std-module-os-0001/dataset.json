@@ -1,0 +1,58 @@
+{
+  "format": "jolt-tasks",
+  "format_version": 1,
+  "name": "rust-std-module-os-0001",
+  "description": "Questions about the standard library module std::os in four formulations (module overview, then the non-experimental items of the module); answers are key phrases (answer_type phrase).",
+  "source": "https://doc.rust-lang.org/std/os/index.html",
+  "default_answer_type": "phrase",
+  "splits": {
+    "train": {
+      "files": [
+        {
+          "file": "train.module-what-it-is.jsonl",
+          "records": 2,
+          "sha256": "165d44d8f9ce9b3374743f1cf29cbcb47c9a07ce2789aadd0ea992ec55efea84"
+        },
+        {
+          "file": "train.module-what-it-is-used-for.jsonl",
+          "records": 2,
+          "sha256": "87160bdd8c00ee90d460883fa527c632e85a17b52c13b9a71a54f78fa41d07f6"
+        },
+        {
+          "file": "train.what-it-is.jsonl",
+          "records": 16,
+          "sha256": "c1c3c583739724930eaa3dfc5fdb2c80406524fdfc816ca60f171bdee61f4b2a"
+        },
+        {
+          "file": "train.what-it-is-used-for.jsonl",
+          "records": 16,
+          "sha256": "2c516617b8722dc8f9d8ce2d3ce4f6d5892967ad1ba76f96e058559eb52a150e"
+        }
+      ]
+    },
+    "test": {
+      "files": [
+        {
+          "file": "test.module-what-it-is.jsonl",
+          "records": 1,
+          "sha256": "226703c74a06c7959bb3e19b611d6eb410ae4f336c720f8377efa9c9c233c98a"
+        },
+        {
+          "file": "test.module-what-it-is-used-for.jsonl",
+          "records": 1,
+          "sha256": "87d49aa75f3349291ff08ae460ce86e4dd120541856a1b7f77173e630e85bd4a"
+        },
+        {
+          "file": "test.what-it-is.jsonl",
+          "records": 8,
+          "sha256": "57fad1574480c0129f25df458895a9e30dcf9733b6b808fe213af97743ed4e29"
+        },
+        {
+          "file": "test.what-it-is-used-for.jsonl",
+          "records": 8,
+          "sha256": "672050ad5158aa993162a16905a9cf7dbddfc68df626d59304062b74b3b5578c"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,21 @@
+# Empty carrier crate: its dependencies are the crates whose rustdoc JSON is built for the sft corpus
+# (docs/08-sft.md, scripts/build_cargo_corpus.py). Versions are pinned as in the datasets/rust/rust-cargo-* datasets.
+[package]
+name = "rustdoc-cargo"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+async-trait = "=0.1.92"
+bytes = { version = "=1.12.1", features = ["serde"] }
+serde = { version = "=1.0.229", features = ["derive", "rc"] }
+serde_json = { version = "=1.0.154", features = ["raw_value", "unbounded_depth"] }
+tauri = "=2.12.5"
+tauri-plugin-dialog = "=2.8.4"
+thiserror = "=2.0.21"
+tokio = { version = "=1.54.1", features = ["full"] }
+uuid = { version = "=1.29.0", features = ["v1", "v3", "v4", "v5", "v6", "v7", "v8", "serde"] }

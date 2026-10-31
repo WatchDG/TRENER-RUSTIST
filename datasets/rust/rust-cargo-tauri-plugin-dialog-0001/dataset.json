@@ -1,0 +1,48 @@
+{
+  "format": "jolt-tasks",
+  "format_version": 1,
+  "name": "rust-cargo-tauri-plugin-dialog-0001",
+  "description": "",
+  "source": "",
+  "default_answer_type": "number",
+  "splits": {
+    "test": {
+      "files": [
+        {
+          "file": "test.caveats.jsonl",
+          "records": 15,
+          "sha256": "64ae6890e827d5d91c2d51fff4b125f941bb65e53860ceb01eef4f1eb4823daf"
+        },
+        {
+          "file": "test.what-it-is.jsonl",
+          "records": 15,
+          "sha256": "8a764a12849d1b43b2f23f30ba5f1a5385f29616ded95b6df0a176569224b9be"
+        },
+        {
+          "file": "test.when-to-use.jsonl",
+          "records": 15,
+          "sha256": "297f8e79f838fcbec347f3876bc8f0944c0fe21dc86e225d229080c8093f6c14"
+        }
+      ]
+    },
+    "train": {
+      "files": [
+        {
+          "file": "train.caveats.jsonl",
+          "records": 30,
+          "sha256": "7acbf4adb7dce4b6fa8b63c22d440aa25dded056a1f02183cf3ed73aa9400e17"
+        },
+        {
+          "file": "train.what-it-is.jsonl",
+          "records": 30,
+          "sha256": "1f6eec76aa3aa94dca702a81d197cbcb75b9541746bb67ca124a11705d38ac27"
+        },
+        {
+          "file": "train.when-to-use.jsonl",
+          "records": 30,
+          "sha256": "98740855ffc10182dbfa953480db03296aba451fa98f8f602853bde7cee5c1d4"
+        }
+      ]
+    }
+  }
+}

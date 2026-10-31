@@ -1,0 +1,58 @@
+{
+  "format": "jolt-tasks",
+  "format_version": 1,
+  "name": "rust-std-module-ffi-0001",
+  "description": "Questions about the standard library module std::ffi in four formulations (module overview, then the non-experimental items of the module); answers are key phrases (answer_type phrase).",
+  "source": "https://doc.rust-lang.org/std/ffi/index.html",
+  "default_answer_type": "phrase",
+  "splits": {
+    "train": {
+      "files": [
+        {
+          "file": "train.module-what-it-is.jsonl",
+          "records": 2,
+          "sha256": "7e91b5a118f7d18e259836865c696942eb0e6ec272e64e06beb820f581b0c49c"
+        },
+        {
+          "file": "train.module-what-it-is-used-for.jsonl",
+          "records": 2,
+          "sha256": "0e8efd645cd0126ce2776b3d8140e226ea975697f9cc00f3917b9fdbf235ce57"
+        },
+        {
+          "file": "train.what-it-is.jsonl",
+          "records": 52,
+          "sha256": "d4c3dd1b30c9ab001ef3247b6a13ae4242dc6557bd52de6ae784de23ab62a637"
+        },
+        {
+          "file": "train.what-it-is-used-for.jsonl",
+          "records": 52,
+          "sha256": "116ff3185dfe74e23c4a86038746d109f28624d13c7d94e8269f25777e18bc52"
+        }
+      ]
+    },
+    "test": {
+      "files": [
+        {
+          "file": "test.module-what-it-is.jsonl",
+          "records": 1,
+          "sha256": "14fe915c8132ad1581c7fad358f2fd2a846a32f8bd1188f4cdfe73cd6e06acd8"
+        },
+        {
+          "file": "test.module-what-it-is-used-for.jsonl",
+          "records": 1,
+          "sha256": "a43ffd6766228f2d031acad7ba8aa9c428504b528ecdd5f72b74260583b5721c"
+        },
+        {
+          "file": "test.what-it-is.jsonl",
+          "records": 26,
+          "sha256": "48e6c9676e9ceb0f1daee5d6e0e6cce60979af331c6bdde6a015bd73ed696260"
+        },
+        {
+          "file": "test.what-it-is-used-for.jsonl",
+          "records": 26,
+          "sha256": "17e7bbd1649f773f0791dae762e6cf6b768eda15832f731b63f1801f9524625a"
+        }
+      ]
+    }
+  }
+}

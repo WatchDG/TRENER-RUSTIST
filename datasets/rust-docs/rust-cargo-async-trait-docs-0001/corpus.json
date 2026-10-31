@@ -1,0 +1,23 @@
+{
+  "format": "jolt-corpus",
+  "format_version": 1,
+  "name": "rust-cargo-async-trait-docs-0001",
+  "description": "rustdoc JSON: async_trait 0.1.92",
+  "source": "datasets/rust-docs/.rustdoc-target/doc",
+  "splits": {
+    "train": {
+      "files": [
+        {
+          "file": "train.text.jsonl",
+          "records": 2,
+          "sha256": "9d767055d5c4026a0dfd6f928ccf37695e0aa467c35f4ad64958bffaeeda55cb"
+        },
+        {
+          "file": "train.qa.jsonl",
+          "records": 5,
+          "sha256": "c4d40e39ff3c4be00bcc8157cd51c21973d6706773dd4e2d850586d8660fe893"
+        }
+      ]
+    }
+  }
+}

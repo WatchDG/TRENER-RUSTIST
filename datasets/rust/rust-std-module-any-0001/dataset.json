@@ -1,0 +1,58 @@
+{
+  "format": "jolt-tasks",
+  "format_version": 1,
+  "name": "rust-std-module-any-0001",
+  "description": "Questions about the standard library module std::any in four formulations (module overview, then the non-experimental items of the module); answers are key phrases (answer_type phrase).",
+  "source": "https://doc.rust-lang.org/std/any/index.html",
+  "default_answer_type": "phrase",
+  "splits": {
+    "train": {
+      "files": [
+        {
+          "file": "train.module-what-it-is.jsonl",
+          "records": 2,
+          "sha256": "db073d7d78702c98f710c9877b4526ac6a45eb17fb28913aaed38ca94eeb380f"
+        },
+        {
+          "file": "train.module-what-it-is-used-for.jsonl",
+          "records": 2,
+          "sha256": "19cc797397bf9ee102d1dc2d01430ad2c2259c8b6adace186feec00df07c15c3"
+        },
+        {
+          "file": "train.what-it-is.jsonl",
+          "records": 8,
+          "sha256": "56566cf1a208eeee4800b3b3f6f29ba53f23c525a39edc65274726f8195167d0"
+        },
+        {
+          "file": "train.what-it-is-used-for.jsonl",
+          "records": 8,
+          "sha256": "229c3fb9f7e5e3a9ea6357abb0d4b3dbe108bbc4fabfac752ff0ff2a08b27413"
+        }
+      ]
+    },
+    "test": {
+      "files": [
+        {
+          "file": "test.module-what-it-is.jsonl",
+          "records": 1,
+          "sha256": "0009caf28cfd6088bd2ab8fd5fe721a22f0e4961ac87b50bb21d658181026758"
+        },
+        {
+          "file": "test.module-what-it-is-used-for.jsonl",
+          "records": 1,
+          "sha256": "22650a9e27698246cdd64421474ee29d5f5c8631f4aa07ce01b35bf333573145"
+        },
+        {
+          "file": "test.what-it-is.jsonl",
+          "records": 4,
+          "sha256": "b5b0116df834652d84f22f6fd0dbf397d10311e9fef692138c5cf7990baa80b1"
+        },
+        {
+          "file": "test.what-it-is-used-for.jsonl",
+          "records": 4,
+          "sha256": "392f4574edd781799759905ffa93e6dfba41bd4c79317b1938cd9ff76a150ea4"
+        }
+      ]
+    }
+  }
+}

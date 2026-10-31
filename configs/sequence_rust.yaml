@@ -1,0 +1,65 @@
+# Sequential training: stages run in order, each starting from the final checkpoint of the previous one
+# (the first starts from the base model). `python -m trener sequence --config configs/sequence_rust.yaml`.
+# State is kept in runs/rust_sequence/sequence.json: re-running skips completed stages and resumes the interrupted one.
+name: rust_sequence
+out_dir: runs
+dist_dir: dist           # where finished models are collected (optional; default dist, in .gitignore)
+stages:
+  - config: configs/rust_std/rust_keywords_jolt.yaml
+  - config: configs/rust_std/rust_traits_jolt.yaml
+  - config: configs/rust_std/rust_macros_jolt.yaml
+  - config: configs/rust_std/rust_std_alloc_jolt.yaml
+  - config: configs/rust_std/rust_std_any_jolt.yaml
+  - config: configs/rust_std/rust_std_arch_jolt.yaml
+  - config: configs/rust_std/rust_std_array_jolt.yaml
+  - config: configs/rust_std/rust_std_ascii_jolt.yaml
+  - config: configs/rust_std/rust_std_backtrace_jolt.yaml
+  - config: configs/rust_std/rust_std_borrow_jolt.yaml
+  - config: configs/rust_std/rust_std_boxed_jolt.yaml
+  - config: configs/rust_std/rust_std_cell_jolt.yaml
+  - config: configs/rust_std/rust_std_char_jolt.yaml
+  - config: configs/rust_std/rust_std_cmp_jolt.yaml
+  - config: configs/rust_std/rust_std_collections_jolt.yaml
+  - config: configs/rust_std/rust_std_default_jolt.yaml
+  - config: configs/rust_std/rust_std_env_jolt.yaml
+  - config: configs/rust_std/rust_std_error_jolt.yaml
+  - config: configs/rust_std/rust_std_f32_jolt.yaml
+  - config: configs/rust_std/rust_std_f64_jolt.yaml
+  - config: configs/rust_std/rust_std_ffi_jolt.yaml
+  - config: configs/rust_std/rust_std_fmt_jolt.yaml
+  - config: configs/rust_std/rust_std_fs_jolt.yaml
+  - config: configs/rust_std/rust_std_hash_jolt.yaml
+  - config: configs/rust_std/rust_std_hint_jolt.yaml
+  - config: configs/rust_std/rust_std_io_jolt.yaml
+  - config: configs/rust_std/rust_std_iter_jolt.yaml
+  - config: configs/rust_std/rust_std_marker_jolt.yaml
+  - config: configs/rust_std/rust_std_mem_jolt.yaml
+  - config: configs/rust_std/rust_std_net_jolt.yaml
+  - config: configs/rust_std/rust_std_num_jolt.yaml
+  - config: configs/rust_std/rust_std_ops_jolt.yaml
+  - config: configs/rust_std/rust_std_option_jolt.yaml
+  - config: configs/rust_std/rust_std_os_jolt.yaml
+  - config: configs/rust_std/rust_std_panic_jolt.yaml
+  - config: configs/rust_std/rust_std_path_jolt.yaml
+  - config: configs/rust_std/rust_std_pin_jolt.yaml
+  - config: configs/rust_std/rust_std_prelude_jolt.yaml
+  - config: configs/rust_std/rust_std_primitive_jolt.yaml
+  - config: configs/rust_std/rust_std_process_jolt.yaml
+  - config: configs/rust_std/rust_std_ptr_jolt.yaml
+  - config: configs/rust_std/rust_std_range_jolt.yaml
+  - config: configs/rust_std/rust_std_rc_jolt.yaml
+  - config: configs/rust_std/rust_std_result_jolt.yaml
+  - config: configs/rust_std/rust_std_slice_jolt.yaml
+  - config: configs/rust_std/rust_std_str_jolt.yaml
+  - config: configs/rust_std/rust_std_string_jolt.yaml
+  - config: configs/rust_std/rust_std_sync_jolt.yaml
+  - config: configs/rust_std/rust_std_task_jolt.yaml
+  - config: configs/rust_std/rust_std_thread_jolt.yaml
+  - config: configs/rust_std/rust_std_time_jolt.yaml
+  - config: configs/rust_std/rust_std_vec_jolt.yaml
+    # Finished model: after the last stage, the final checkpoint's model.safetensors and all files
+    # of the source model (config.json, model code, tokenizer, chat_template, generation_config, etc.), except its weights, are copied to dist/<name>.
+    # The directory must not exist or must be empty; this is checked before the first stage starts. Without this field, no model is assembled.
+    dist: rust-0001
+    # set: [optim.steps=80]                      # point overrides, like --set for train
+    # init_from: runs/<run>/checkpoints/step-N  # replaces the chain: this stage's weights are loaded from here

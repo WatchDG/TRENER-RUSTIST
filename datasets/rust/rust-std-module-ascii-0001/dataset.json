@@ -1,0 +1,58 @@
+{
+  "format": "jolt-tasks",
+  "format_version": 1,
+  "name": "rust-std-module-ascii-0001",
+  "description": "Questions about the standard library module std::ascii in four formulations (module overview, then the non-experimental items of the module); answers are key phrases (answer_type phrase).",
+  "source": "https://doc.rust-lang.org/std/ascii/index.html",
+  "default_answer_type": "phrase",
+  "splits": {
+    "train": {
+      "files": [
+        {
+          "file": "train.module-what-it-is.jsonl",
+          "records": 2,
+          "sha256": "4356fba0c143a63d5caa5581345a420c64fed982a7c65572facdd3f0ec96351c"
+        },
+        {
+          "file": "train.module-what-it-is-used-for.jsonl",
+          "records": 2,
+          "sha256": "7e6e1a4344169979072b715391fb3a8ac4b7431638de6acce73a345756e677eb"
+        },
+        {
+          "file": "train.what-it-is.jsonl",
+          "records": 6,
+          "sha256": "738780b44c4869751de7f4b2bbda7a9fc3519825a642d3911da090881fd096b8"
+        },
+        {
+          "file": "train.what-it-is-used-for.jsonl",
+          "records": 6,
+          "sha256": "9a36f43b5250d0ee8e54cbe8f8d23d5d0e08048b2a5bf30decfe0c8b2c7f8709"
+        }
+      ]
+    },
+    "test": {
+      "files": [
+        {
+          "file": "test.module-what-it-is.jsonl",
+          "records": 1,
+          "sha256": "1b96de87ccc5d2db5b4217e75caca8c4b9ed3b276e005ee4a94ebe330c460fc2"
+        },
+        {
+          "file": "test.module-what-it-is-used-for.jsonl",
+          "records": 1,
+          "sha256": "2762cfffdfd426c9de53fb6b35a4fd2eb619bf03260ede8c19edb4fdb8650940"
+        },
+        {
+          "file": "test.what-it-is.jsonl",
+          "records": 3,
+          "sha256": "25c6ef3ae70ee7372d5c27fd196dde26e41be14120577e004d4a890631d89aeb"
+        },
+        {
+          "file": "test.what-it-is-used-for.jsonl",
+          "records": 3,
+          "sha256": "02f91b68a2ec0fee3fd1e578419c3c81c1ecd4f8a75e2ac72ce21310c4fc5e13"
+        }
+      ]
+    }
+  }
+}

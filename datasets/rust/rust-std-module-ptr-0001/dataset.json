@@ -1,0 +1,58 @@
+{
+  "format": "jolt-tasks",
+  "format_version": 1,
+  "name": "rust-std-module-ptr-0001",
+  "description": "Questions about the standard library module std::ptr in four formulations (module overview, then the non-experimental macros addr_of and addr_of_mut, the NonNull struct and the raw-pointer functions); answers are key phrases (answer_type phrase).",
+  "source": "https://doc.rust-lang.org/std/ptr/index.html",
+  "default_answer_type": "phrase",
+  "splits": {
+    "train": {
+      "files": [
+        {
+          "file": "train.module-what-it-is.jsonl",
+          "records": 2,
+          "sha256": "2c94b0605450bc888ce7d4f74ac62d50c86ac0f9f16f93c5dc759a7009996b84"
+        },
+        {
+          "file": "train.module-what-it-is-used-for.jsonl",
+          "records": 2,
+          "sha256": "48d1c20cbc9be4a84bb49e699a47a0a0c9952ebf899f3c621cfb8aa58f3a0303"
+        },
+        {
+          "file": "train.what-it-is.jsonl",
+          "records": 64,
+          "sha256": "9f1a9b2c2dee13a98697d3475206708a8e38021f839c0b886ee470e265b27982"
+        },
+        {
+          "file": "train.what-it-is-used-for.jsonl",
+          "records": 64,
+          "sha256": "4dd9d3ad767110e378446b718ab88f020e2811959dec8a00ded980c692dcea0e"
+        }
+      ]
+    },
+    "test": {
+      "files": [
+        {
+          "file": "test.module-what-it-is.jsonl",
+          "records": 1,
+          "sha256": "dbf1cff2af6415e2645cd7fb5c6899dbb7a47da9b2204b0fdfa626fa49a388ba"
+        },
+        {
+          "file": "test.module-what-it-is-used-for.jsonl",
+          "records": 1,
+          "sha256": "997b65da35699d02e963e611759362872e8b927a43e172d863b26ee6bed68b50"
+        },
+        {
+          "file": "test.what-it-is.jsonl",
+          "records": 32,
+          "sha256": "5cb844a557a573e83c33c7e1b603e5af84faca59ae6b4d504d6c86d9c6e72bf9"
+        },
+        {
+          "file": "test.what-it-is-used-for.jsonl",
+          "records": 32,
+          "sha256": "72f33d691fd7fefc4005e9e886305dfb48981d935f012ccd4fb5ab1736ae6868"
+        }
+      ]
+    }
+  }
+}

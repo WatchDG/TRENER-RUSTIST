@@ -1,0 +1,58 @@
+{
+  "format": "jolt-tasks",
+  "format_version": 1,
+  "name": "rust-std-module-backtrace-0001",
+  "description": "Questions about the standard library module std::backtrace in four formulations (module overview, then the non-experimental items of the module); answers are key phrases (answer_type phrase).",
+  "source": "https://doc.rust-lang.org/std/backtrace/index.html",
+  "default_answer_type": "phrase",
+  "splits": {
+    "train": {
+      "files": [
+        {
+          "file": "train.module-what-it-is.jsonl",
+          "records": 2,
+          "sha256": "f299f7c5d1c8efc674b1c37cb20c41ff2cae3c4d76ef34068fd9f1115acf584d"
+        },
+        {
+          "file": "train.module-what-it-is-used-for.jsonl",
+          "records": 2,
+          "sha256": "c3a0bd6919a8a2d0828dc1ae31d151a37cf62945d7b63b4ffe7b3deea20ae5db"
+        },
+        {
+          "file": "train.what-it-is.jsonl",
+          "records": 4,
+          "sha256": "8761f9ce890168dd705c68a52fade1dfa5beefb63f395ba9d966e40ddbb63ae4"
+        },
+        {
+          "file": "train.what-it-is-used-for.jsonl",
+          "records": 4,
+          "sha256": "970f46b97f59cdf011629bdfd608e79e93757e8541601c8574dbcf8ba09555df"
+        }
+      ]
+    },
+    "test": {
+      "files": [
+        {
+          "file": "test.module-what-it-is.jsonl",
+          "records": 1,
+          "sha256": "918e08e120d81cfd7f0ad8f377b18fca043b38f78c764dea0de888d4fff4281e"
+        },
+        {
+          "file": "test.module-what-it-is-used-for.jsonl",
+          "records": 1,
+          "sha256": "645ccb1a0608a6e46f0b6a82a7d3d5cdfa2bc6f6e3e8a438e50bb21505721147"
+        },
+        {
+          "file": "test.what-it-is.jsonl",
+          "records": 2,
+          "sha256": "fe0b3065464b19da383f5c9b8b0954f645daa3aa42a5ab9240f55346b6f39cf9"
+        },
+        {
+          "file": "test.what-it-is-used-for.jsonl",
+          "records": 2,
+          "sha256": "ba92955dc983ed6b3f408102dba9e8b8a389c0690970041207b14c19b3d1042f"
+        }
+      ]
+    }
+  }
+}

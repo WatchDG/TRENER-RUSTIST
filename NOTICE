@@ -1,0 +1,26 @@
+trener
+Copyright 2026 Baranov Grigoriy Vladimirovich
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+This project implements the JOLT / JOLT+ method described in
+"A Good Self-Teacher Meets the Student Where They Are: Joint On-Policy
+Learning and Teaching" (arXiv:2610.10447): https://arxiv.org/abs/2610.10447
+
+Model weights and Python dependencies (see requirements.txt) are not included
+or redistributed; they are licensed separately by their respective authors.
+
+The datasets in datasets/ are partly derived from the documentation of the Rust
+standard library and of third-party crates (MIT OR Apache-2.0, MIT). Sources,
+versions, copyright notices and license texts are listed in
+THIRD_PARTY_NOTICES.md.

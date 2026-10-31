@@ -1,0 +1,32 @@
+{
+  "format": "jolt-corpus",
+  "format_version": 1,
+  "name": "rust-cargo-tauri-docs-0001",
+  "description": "rustdoc JSON: tauri 2.12.5",
+  "source": "datasets/rust-docs/.rustdoc-target/doc",
+  "splits": {
+    "train": {
+      "files": [
+        {
+          "file": "train.text.jsonl",
+          "records": 1302,
+          "sha256": "6a87d929e9ac12f7a0b398aaff138996da92693d1bf45451e2604231a4f39965"
+        },
+        {
+          "file": "train.qa.jsonl",
+          "records": 4575,
+          "sha256": "840e299b787a5ba5039e29ac39bafb0d07455c7d54624d373dbf56adfa34bcb3"
+        }
+      ]
+    },
+    "test": {
+      "files": [
+        {
+          "file": "test.qa.jsonl",
+          "records": 66,
+          "sha256": "d3ff138c5d685cdc938f614dadb222b4831f88e58a1882b6121eb122209bf580"
+        }
+      ]
+    }
+  }
+}

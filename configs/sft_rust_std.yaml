@@ -1,0 +1,43 @@
+# Preset: SFT stage on the std documentation before JOLT (docs/08-sft.md).
+# Corpus is prepared in advance: python scripts/build_rustdoc_corpus.py --out datasets/rust-docs/rust-std-docs-0001
+# Epoch size in steps: python -m trener data validate-corpus datasets/rust-docs/rust-std-docs-0001 --config configs/sft_rust_std.yaml
+# Corpus: 4795 items, 28.9k documents, 1.83M loss tokens (2.41M total); 8 rows of 4096 tokens per step —
+# 589 rows, ~74 steps per epoch; 296 steps ≈ 4 epochs (~6 s per step on RTX 4090, peak VRAM ≈ 12.6 GB).
+run:
+  name: rust_std_docs_lfm3_sft
+  seed: 0
+  out_dir: runs
+  checkpoint_every_epochs: 1
+  release_cache: true
+  pinned_checkpoint: true
+method: sft
+model:
+  path: models/LFM3-1.7B
+  dtype: bfloat16
+  trust_remote_code: true
+  attn_implementation: sdpa
+  gradient_checkpointing: true
+  compile_kernels: true
+sft:
+  corpus: datasets/rust-docs/rust-std-docs-0001
+  max_tokens: 4096
+  rows_per_step: 8
+  # replay against forgetting (prepared in advance: python -m trener data make-replay ...):
+  # replay: datasets/rust-docs/replay-lfm3
+  # replay_ratio: 0.15
+  eval_tasks: false
+optim:
+  lr: 2.0e-5               # 20x higher than JOLT: this stage adds new facts rather than reshaping the answer format
+  optimizer: adafactor
+  master_weights: true
+  max_grad_norm: 1.0
+  epochs: 5
+  schedule: cosine
+  warmup_steps: 16
+  master_storage: split
+eval:
+  every_epochs: 1                # NLL on the test split of the corpus, once per epoch
+  split: test
+  limit: 100
+  max_new_tokens: 1024
+  batch_mode: auto

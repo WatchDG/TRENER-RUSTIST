@@ -1,0 +1,48 @@
+{
+  "format": "jolt-tasks",
+  "format_version": 1,
+  "name": "rust-cargo-tauri-0001",
+  "description": "",
+  "source": "",
+  "default_answer_type": "number",
+  "splits": {
+    "test": {
+      "files": [
+        {
+          "file": "test.caveats.jsonl",
+          "records": 19,
+          "sha256": "5070238a324a753db3599dc7a4fc88c149ae2bac7408b628a163784f30286a64"
+        },
+        {
+          "file": "test.what-it-is.jsonl",
+          "records": 19,
+          "sha256": "e46cbb8df2e3a802ade22c30af1384756e06e74e7c5a2ac158ca67b3f75f2f80"
+        },
+        {
+          "file": "test.when-to-use.jsonl",
+          "records": 19,
+          "sha256": "555945a1c0821c5b53af78a693e5963c356d52c64cc6d4c2ad3af295b2779e2a"
+        }
+      ]
+    },
+    "train": {
+      "files": [
+        {
+          "file": "train.caveats.jsonl",
+          "records": 38,
+          "sha256": "c49e657402edd99bb881963fc601b16a00a82d3f84b797e029892dca0329eee1"
+        },
+        {
+          "file": "train.what-it-is.jsonl",
+          "records": 38,
+          "sha256": "96a36e0dd87bab4cee0ab775c613563f5cd2ff3d6c9125121049567ac4222b71"
+        },
+        {
+          "file": "train.when-to-use.jsonl",
+          "records": 38,
+          "sha256": "70cf18864b20ae95807ce1cd11d38758877d76f5f7767616bbef233d9eee3dd6"
+        }
+      ]
+    }
+  }
+}

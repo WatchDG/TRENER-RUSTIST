@@ -1,0 +1,22 @@
+# Sequential cargo training: stages run in order, each starting from the final checkpoint of the previous one
+# (the first starts from the base model). `python -m trener sequence --config configs/sequence_rust_cargo.yaml`.
+# State is kept in runs/rust_cargo_sequence/sequence.json: re-running skips completed stages and resumes the interrupted one.
+name: rust_cargo_sequence
+out_dir: runs
+dist_dir: dist           # where finished models are collected (optional; default dist, in .gitignore)
+stages:
+  - config: configs/rust_cargo/rust_cargo_async_trait_jolt.yaml
+  - config: configs/rust_cargo/rust_cargo_bytes_jolt.yaml
+  - config: configs/rust_cargo/rust_cargo_serde_jolt.yaml
+  - config: configs/rust_cargo/rust_cargo_serde_json_jolt.yaml
+  - config: configs/rust_cargo/rust_cargo_tauri_jolt.yaml
+  - config: configs/rust_cargo/rust_cargo_tauri_plugin_dialog_jolt.yaml
+  - config: configs/rust_cargo/rust_cargo_thiserror_jolt.yaml
+  - config: configs/rust_cargo/rust_cargo_tokio_jolt.yaml
+  - config: configs/rust_cargo/rust_cargo_uuid_jolt.yaml
+    # Finished model: after the last stage, the final checkpoint's model.safetensors and all files
+    # of the source model (config.json, model code, tokenizer, chat_template, generation_config, etc.), except its weights, are copied to dist/<name>.
+    # The directory must not exist or must be empty; this is checked before the first stage starts. Without this field, no model is assembled.
+    dist: rust-cargo-0001
+    # set: [optim.steps=80]                      # point overrides, like --set for train
+    # init_from: runs/<run>/checkpoints/step-N  # replaces the chain: this stage's weights are loaded from here

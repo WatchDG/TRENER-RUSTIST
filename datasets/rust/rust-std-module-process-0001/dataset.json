@@ -1,0 +1,58 @@
+{
+  "format": "jolt-tasks",
+  "format_version": 1,
+  "name": "rust-std-module-process-0001",
+  "description": "Questions about the standard library module std::process in four formulations (module overview, then each non-experimental struct, the Termination trait and function); answers are key phrases (answer_type phrase).",
+  "source": "https://doc.rust-lang.org/std/process/index.html",
+  "default_answer_type": "phrase",
+  "splits": {
+    "train": {
+      "files": [
+        {
+          "file": "train.module-what-it-is.jsonl",
+          "records": 2,
+          "sha256": "74f593f41b36cde885806f706857a5b972eb022fec11c72a208407736860eb36"
+        },
+        {
+          "file": "train.module-what-it-is-used-for.jsonl",
+          "records": 2,
+          "sha256": "ffe112447f07412be13abbdebbae0f4d6eab7047e03667e93d5fba9cc50f719e"
+        },
+        {
+          "file": "train.what-it-is.jsonl",
+          "records": 30,
+          "sha256": "28940fbca2506f173b63998f429cae074506171d874394e659ff4533a07ada46"
+        },
+        {
+          "file": "train.what-it-is-used-for.jsonl",
+          "records": 30,
+          "sha256": "2866d03a766e30dd21c25c00c9f4e1679507ed296f798f8ced1c2a36a59a8689"
+        }
+      ]
+    },
+    "test": {
+      "files": [
+        {
+          "file": "test.module-what-it-is.jsonl",
+          "records": 1,
+          "sha256": "9941ad078970ae42907a5c43a198b0b4093c8ec99f30769dda43cc04b2e54f6d"
+        },
+        {
+          "file": "test.module-what-it-is-used-for.jsonl",
+          "records": 1,
+          "sha256": "77335ba8f4585d686ce40c5abf7d0e370b9cde2db98d4176fbcbc3f8e28323c0"
+        },
+        {
+          "file": "test.what-it-is.jsonl",
+          "records": 15,
+          "sha256": "db7004ef89b29103abe51d0a7c0e0ebe554f7e363800e2a0609482309f9de844"
+        },
+        {
+          "file": "test.what-it-is-used-for.jsonl",
+          "records": 15,
+          "sha256": "e1f96ab9820b837b7af34862caf81b485977ceeed517dbf7a7603d94d4c5e871"
+        }
+      ]
+    }
+  }
+}

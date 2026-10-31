@@ -1,0 +1,7 @@
+# Pinned development dependencies: tests and lint. Install together with requirements.txt:
+#   .venv\Scripts\python.exe -m pip install --extra-index-url https://download.pytorch.org/whl/cu130 -r requirements.txt -r requirements-dev.txt
+#
+iniconfig==2.3.1
+pluggy==1.7.0
+pytest==9.0.1
+ruff==0.14.6

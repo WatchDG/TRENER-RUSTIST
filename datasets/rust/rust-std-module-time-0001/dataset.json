@@ -1,0 +1,58 @@
+{
+  "format": "jolt-tasks",
+  "format_version": 1,
+  "name": "rust-std-module-time-0001",
+  "description": "Questions about the standard library module std::time in four formulations (module overview, then the non-experimental structs and the UNIX_EPOCH constant); answers are key phrases (answer_type phrase).",
+  "source": "https://doc.rust-lang.org/std/time/index.html",
+  "default_answer_type": "phrase",
+  "splits": {
+    "train": {
+      "files": [
+        {
+          "file": "train.module-what-it-is.jsonl",
+          "records": 2,
+          "sha256": "3aacc7bd6f90b16bdd2bfb315d697ca374055ca87e1aa0079bfd80d06fbfa2d8"
+        },
+        {
+          "file": "train.module-what-it-is-used-for.jsonl",
+          "records": 2,
+          "sha256": "f16ba04d082d0f0bcc24f30b9c9ecd66ea94bae54b82e94e5a85718ca7044684"
+        },
+        {
+          "file": "train.what-it-is.jsonl",
+          "records": 12,
+          "sha256": "816ba6b807a1f08b90faf934f8d29120438e348efb857d7c625a873d928d2e04"
+        },
+        {
+          "file": "train.what-it-is-used-for.jsonl",
+          "records": 12,
+          "sha256": "5ba0d67e60997f4d9500716015fc3c6fb2717fba71610c5599c2d11e3268a711"
+        }
+      ]
+    },
+    "test": {
+      "files": [
+        {
+          "file": "test.module-what-it-is.jsonl",
+          "records": 1,
+          "sha256": "f53605ea690adabea3b32474800be86d19cccfbdf73a4cd1795d5058d474fc11"
+        },
+        {
+          "file": "test.module-what-it-is-used-for.jsonl",
+          "records": 1,
+          "sha256": "07013ad17592773f4621afd79f76bd1f37e31c04079d0ed426c018d1d8e5335b"
+        },
+        {
+          "file": "test.what-it-is.jsonl",
+          "records": 6,
+          "sha256": "3f2202685e6ea2917ef21488a3766476f32ed306ad4503cdce011120949ad50c"
+        },
+        {
+          "file": "test.what-it-is-used-for.jsonl",
+          "records": 6,
+          "sha256": "006972780a0e26eef6109e0a6b09330f6d0d05743bb23b53376df5b16ccf13f4"
+        }
+      ]
+    }
+  }
+}

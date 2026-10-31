@@ -1,0 +1,58 @@
+{
+  "format": "jolt-tasks",
+  "format_version": 1,
+  "name": "rust-std-module-arch-0001",
+  "description": "Questions about the standard library module std::arch in four formulations (module overview, then the non-experimental items of the module); answers are key phrases (answer_type phrase).",
+  "source": "https://doc.rust-lang.org/std/arch/index.html",
+  "default_answer_type": "phrase",
+  "splits": {
+    "train": {
+      "files": [
+        {
+          "file": "train.module-what-it-is.jsonl",
+          "records": 2,
+          "sha256": "a4e0b1362480e8f805a2912031924769d7ab4cbcca5526d493efa91680b20830"
+        },
+        {
+          "file": "train.module-what-it-is-used-for.jsonl",
+          "records": 2,
+          "sha256": "a4ada58db1135680e37ef5bc6f4f4ac92b85fc8a5b3c5ae85b9ea832a788ddb3"
+        },
+        {
+          "file": "train.what-it-is.jsonl",
+          "records": 10,
+          "sha256": "37ed6d202c4ec884ec0d8bd73a3652bc0044444804151812eaa2a68470c3b9ba"
+        },
+        {
+          "file": "train.what-it-is-used-for.jsonl",
+          "records": 10,
+          "sha256": "5bd6ccdac1ca21364c3cbd605699ad6eee3c5d6168fffb77699da5cf02a2c2b0"
+        }
+      ]
+    },
+    "test": {
+      "files": [
+        {
+          "file": "test.module-what-it-is.jsonl",
+          "records": 1,
+          "sha256": "fa9373b4315ba681b964202aad3a08841e05c981979280c3de3c0359a6fc1a87"
+        },
+        {
+          "file": "test.module-what-it-is-used-for.jsonl",
+          "records": 1,
+          "sha256": "2aae504eb734b4f2e04da74d1395fe1ddca76a839400ad35a322708c243947e5"
+        },
+        {
+          "file": "test.what-it-is.jsonl",
+          "records": 5,
+          "sha256": "2347f0926bf66641f2247340680a966b64a07540f41414c33085f09b312cc283"
+        },
+        {
+          "file": "test.what-it-is-used-for.jsonl",
+          "records": 5,
+          "sha256": "a9004f10f70b952293014cc7cee366adae643d0664da02549d4348c977b24a06"
+        }
+      ]
+    }
+  }
+}

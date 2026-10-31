@@ -1,0 +1,58 @@
+{
+  "format": "jolt-tasks",
+  "format_version": 1,
+  "name": "rust-std-module-option-0001",
+  "description": "Questions about the standard library module std::option in four formulations (module overview, then the Option enum and its iterators Iter, IterMut and IntoIter); answers are key phrases (answer_type phrase).",
+  "source": "https://doc.rust-lang.org/std/option/index.html",
+  "default_answer_type": "phrase",
+  "splits": {
+    "train": {
+      "files": [
+        {
+          "file": "train.module-what-it-is.jsonl",
+          "records": 2,
+          "sha256": "e1df9254e8e58a095b3089a96d53ca447ef30b94c34c03d9be3822633f0e9657"
+        },
+        {
+          "file": "train.module-what-it-is-used-for.jsonl",
+          "records": 2,
+          "sha256": "56f10e91ced0e9784cd3ceeda6e97ecfcd08dd780dca8a9cd733bb9f8f6e6b1d"
+        },
+        {
+          "file": "train.what-it-is.jsonl",
+          "records": 8,
+          "sha256": "de1a09f74c1eb4ffecec7ddf335c3f634d425b206f763638ad8bfef46a258cfb"
+        },
+        {
+          "file": "train.what-it-is-used-for.jsonl",
+          "records": 8,
+          "sha256": "abf0e1b513283d47a765bd52a3406ed54d91f0cd6e6c66e942bafedfab6db5a4"
+        }
+      ]
+    },
+    "test": {
+      "files": [
+        {
+          "file": "test.module-what-it-is.jsonl",
+          "records": 1,
+          "sha256": "ceba47e37cea23eb1a9e330739783e1a5d131fb1a8562f27b58b9335610c8ec9"
+        },
+        {
+          "file": "test.module-what-it-is-used-for.jsonl",
+          "records": 1,
+          "sha256": "89afc1f63818f3dfd7a4c995c7584577d3ff3cddb9c541cb2db71c0644650551"
+        },
+        {
+          "file": "test.what-it-is.jsonl",
+          "records": 4,
+          "sha256": "e863ad71b13937ec1aadf1de48c118da0c155ce52b860ce2c9b22694a701dd84"
+        },
+        {
+          "file": "test.what-it-is-used-for.jsonl",
+          "records": 4,
+          "sha256": "8c43bd164a7411e3991d640288332276babc614c687bfd0727ff6bf359bc0668"
+        }
+      ]
+    }
+  }
+}

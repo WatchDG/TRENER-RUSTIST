@@ -1,0 +1,58 @@
+{
+  "format": "jolt-tasks",
+  "format_version": 1,
+  "name": "rust-std-module-collections-0001",
+  "description": "Questions about the standard library module std::collections in four formulations (module overview, then the non-experimental submodules and structs of the module); answers are key phrases (answer_type phrase).",
+  "source": "https://doc.rust-lang.org/std/collections/index.html",
+  "default_answer_type": "phrase",
+  "splits": {
+    "train": {
+      "files": [
+        {
+          "file": "train.module-what-it-is.jsonl",
+          "records": 2,
+          "sha256": "e3114233d963022d27c328c3e0b15a02fd0ec434423352b33f682aed5dd199b4"
+        },
+        {
+          "file": "train.module-what-it-is-used-for.jsonl",
+          "records": 2,
+          "sha256": "05e6d35347172d36ea76d22f3f1a8f9c68c7b28280f1cd2d78dd38e14983207b"
+        },
+        {
+          "file": "train.what-it-is.jsonl",
+          "records": 30,
+          "sha256": "c7a917a77b44cafbb6dc3c31cf6cfac74154e0f83325918789caea5625aecce0"
+        },
+        {
+          "file": "train.what-it-is-used-for.jsonl",
+          "records": 30,
+          "sha256": "de1787223e333b14b14d795c0c8f66f6b0fd74ff81c8ffd052bf5e9a70110d78"
+        }
+      ]
+    },
+    "test": {
+      "files": [
+        {
+          "file": "test.module-what-it-is.jsonl",
+          "records": 1,
+          "sha256": "159a24e844300442bf34cb32ce42bf8c49e7e23505f124fb766dbdc845df990b"
+        },
+        {
+          "file": "test.module-what-it-is-used-for.jsonl",
+          "records": 1,
+          "sha256": "618cd0a7d20015b12baeba8a87ea0fb3b2922fdacc8387d4c9f9d35ff2e3f88d"
+        },
+        {
+          "file": "test.what-it-is.jsonl",
+          "records": 15,
+          "sha256": "0a6118a89909f2c1968dcd5d87dac919208614bc53f80c7aef8a4b1b785887aa"
+        },
+        {
+          "file": "test.what-it-is-used-for.jsonl",
+          "records": 15,
+          "sha256": "fe5befa716932dcf24aa03f64e88a328eb16605d274986df0e091e2b52052f48"
+        }
+      ]
+    }
+  }
+}

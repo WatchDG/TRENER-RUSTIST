@@ -1,0 +1,58 @@
+{
+  "format": "jolt-tasks",
+  "format_version": 1,
+  "name": "rust-std-module-fmt-0001",
+  "description": "Questions about the standard library module std::fmt in four formulations (module overview, then the non-experimental items of the module); answers are key phrases (answer_type phrase).",
+  "source": "https://doc.rust-lang.org/std/fmt/index.html",
+  "default_answer_type": "phrase",
+  "splits": {
+    "train": {
+      "files": [
+        {
+          "file": "train.module-what-it-is.jsonl",
+          "records": 2,
+          "sha256": "d0afd3751b6a892782b36c7db930eda8f6b383fc9c7c710fcd55bd998ac51d14"
+        },
+        {
+          "file": "train.module-what-it-is-used-for.jsonl",
+          "records": 2,
+          "sha256": "220f7efdb890db9f0a33c82a49714a24f4ce23f5dedfb36b6e8fd9a982243506"
+        },
+        {
+          "file": "train.what-it-is.jsonl",
+          "records": 52,
+          "sha256": "1e3a19227aff0ef498f65be111674eddd81df154e0914a628d25e8dbbf9ec908"
+        },
+        {
+          "file": "train.what-it-is-used-for.jsonl",
+          "records": 52,
+          "sha256": "a716e0dfbb0b5954120629b53f6cb199cb68fe6802e498d8f43e8e3d84093e90"
+        }
+      ]
+    },
+    "test": {
+      "files": [
+        {
+          "file": "test.module-what-it-is.jsonl",
+          "records": 1,
+          "sha256": "707e162307d517ba284a70efd0cdcbaf8b9e4f0fd222ae4e781f7ee9eabc02ac"
+        },
+        {
+          "file": "test.module-what-it-is-used-for.jsonl",
+          "records": 1,
+          "sha256": "e9ef9edc11ee8357624a4ee1054f55c811414858453ed19cf5ec18b17c61f74b"
+        },
+        {
+          "file": "test.what-it-is.jsonl",
+          "records": 26,
+          "sha256": "be401e9cf74b13d8f6e149975dcca598c9b98cb0e6c88d97846ba5e6b3c2913c"
+        },
+        {
+          "file": "test.what-it-is-used-for.jsonl",
+          "records": 26,
+          "sha256": "1bea648ae9ff9d113605b6ec237e41f4e07bd54842ef5e2251751ba58bd37f35"
+        }
+      ]
+    }
+  }
+}

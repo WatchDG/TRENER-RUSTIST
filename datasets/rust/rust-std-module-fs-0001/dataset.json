@@ -1,0 +1,58 @@
+{
+  "format": "jolt-tasks",
+  "format_version": 1,
+  "name": "rust-std-module-fs-0001",
+  "description": "Questions about the standard library module std::fs in four formulations (module overview, then the non-experimental items of the module); answers are key phrases (answer_type phrase).",
+  "source": "https://doc.rust-lang.org/std/fs/index.html",
+  "default_answer_type": "phrase",
+  "splits": {
+    "train": {
+      "files": [
+        {
+          "file": "train.module-what-it-is.jsonl",
+          "records": 2,
+          "sha256": "b4509d801d268ae26fc00b0c6bd1b410280d656e7ffe42b1fa824a95a9f3c893"
+        },
+        {
+          "file": "train.module-what-it-is-used-for.jsonl",
+          "records": 2,
+          "sha256": "5636ea300fda49b180e617529005436daf887ee13b4041158dd5784ce802ed0d"
+        },
+        {
+          "file": "train.what-it-is.jsonl",
+          "records": 62,
+          "sha256": "739fa1e2d2b73a282cb3063c5b058ed6a6f2860837483752ed65335a9c0ec0b0"
+        },
+        {
+          "file": "train.what-it-is-used-for.jsonl",
+          "records": 62,
+          "sha256": "a9c44b707a74723d5db52e85e5561ba719f2fe5cc3d2f95b7125c715407fe9d2"
+        }
+      ]
+    },
+    "test": {
+      "files": [
+        {
+          "file": "test.module-what-it-is.jsonl",
+          "records": 1,
+          "sha256": "bb55ff0ff7b27b5d16120b0458d109aec17a430c00e101cf70c46cd19d56e934"
+        },
+        {
+          "file": "test.module-what-it-is-used-for.jsonl",
+          "records": 1,
+          "sha256": "c3b14da0680d9040be06c753f2b3123b66e5fed21e753ad840a442be2aaea4fa"
+        },
+        {
+          "file": "test.what-it-is.jsonl",
+          "records": 31,
+          "sha256": "0cc3470b7d628139fc75e8983c1835efbf56ccd15a1669970ece199cf13cb29f"
+        },
+        {
+          "file": "test.what-it-is-used-for.jsonl",
+          "records": 31,
+          "sha256": "a7cbc747517e4d6fa9aa8971069dc0a071ac6d63a07f59298bd646fd024d9da4"
+        }
+      ]
+    }
+  }
+}

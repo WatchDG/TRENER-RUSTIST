@@ -1,0 +1,48 @@
+{
+  "format": "jolt-tasks",
+  "format_version": 1,
+  "name": "rust-cargo-tokio-0001",
+  "description": "",
+  "source": "",
+  "default_answer_type": "number",
+  "splits": {
+    "test": {
+      "files": [
+        {
+          "file": "test.caveats.jsonl",
+          "records": 36,
+          "sha256": "b27a2aa6e68670853df95c026bf8c2fc1e07b47592667e58d0d912457439204b"
+        },
+        {
+          "file": "test.what-it-is.jsonl",
+          "records": 36,
+          "sha256": "4300373fa84385031d39b475ce8f9ed75be36e5bc0b673b875f9d6870ba2ce5a"
+        },
+        {
+          "file": "test.when-to-use.jsonl",
+          "records": 36,
+          "sha256": "fec063487f22b51c262755f94a73bc15d7ef46ff4a4cc69975fa4529bf15fad6"
+        }
+      ]
+    },
+    "train": {
+      "files": [
+        {
+          "file": "train.caveats.jsonl",
+          "records": 72,
+          "sha256": "fea67dd512bc050b13c4010f0dffaeeffba70ca7b7e63795c879ed486eb11ab3"
+        },
+        {
+          "file": "train.what-it-is.jsonl",
+          "records": 72,
+          "sha256": "5874ace28c5cb5e10d8eee1476505cf257ef4056a76140f07d4ef32637981c9f"
+        },
+        {
+          "file": "train.when-to-use.jsonl",
+          "records": 72,
+          "sha256": "3f21d258a1306eeea73fe22da0f83a5824d288f8659d2956cb238e6c48726d34"
+        }
+      ]
+    }
+  }
+}
