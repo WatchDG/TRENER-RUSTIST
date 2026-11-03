@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-03
+
+### Changed
+
+- The reasoning markup comes from the model's chat template (`trener/chat_format.py`) instead of being hard-coded:
+  the end-of-reasoning marker of `accuracy_flexible` in the benchmarks is read off the rendered template.
+- An SFT `qa` record without `thinking` is rendered in the template's mode without reasoning
+  (`enable_thinking=False`): the empty reasoning is part of the prompt, the loss is on the answer only. On LFM3 the
+  tokens are the same and `</think>` leaves the loss; on Spark-X2.6, whose template renders a turn without reasoning
+  as `</think>answer` after a generation prompt ending with `<think>`, such a record could not be built at all.
+
 ## [0.6.0] - 2026-11-03
 
 ### Added
@@ -154,7 +165,8 @@ First release.
 - Tests that need the LFM3 tokenizer are skipped when `models/LFM3-1.7B` is
   absent instead of failing.
 
-[Unreleased]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.4.0...v0.4.1

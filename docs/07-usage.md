@@ -48,9 +48,14 @@ The Spark checkpoint's code (`modeling_spark.py`) does not load in transformers 
 its RoPE positions come from `cache_position` (wrong for a left-padded batch and for packed rows) and its attention
 is always eager. `spark2_5.py` computes the same with the same weights (bitwise for `attn_implementation: eager`,
 `tests/test_architectures.py`), with the positions from `position_ids` and attention through `transformers`
-(`sdpa` → `jolt_sdpa`). Its residual stream is fp32, as in the checkpoint's code. The Spark chat template ends the
-generation prompt with `<think>` but renders an assistant turn without reasoning as `</think>answer`, so `qa` records
-of an SFT corpus ([08-sft.md](08-sft.md)) need a `thinking` field on this model.
+(`sdpa` → `jolt_sdpa`). Its residual stream is fp32, as in the checkpoint's code.
+
+**Reasoning markup.** The reasoning markup (`<think>…</think>`) belongs to the tokenizer's chat template, not to the
+architecture, and the pipeline does not hard-code it (`trener/chat_format.py`): the end-of-reasoning marker
+(`accuracy_flexible` of the benchmarks) is read off the rendered template, and text without reasoning (`qa` records of
+an SFT corpus without `thinking`, [08-sft.md](08-sft.md)) is rendered in the template's mode without reasoning
+(`enable_thinking=False`). The templates differ exactly there: a turn without reasoning is `<think></think>answer` in
+LFM3 and `</think>answer` in Spark-X2.6, whose system block also changes with `enable_thinking`.
 
 The `models/` directory is in `.gitignore` and is not committed.
 
@@ -83,7 +88,7 @@ Checking the environment:
 .venv\Scripts\python.exe -c "import trener; print(trener.__version__)"
 ```
 
-Expected: `2.13.0+cu130 13.0 True` and `0.6.0`.
+Expected: `2.13.0+cu130 13.0 True` and `0.7.0`.
 
 Data: the presets read tasks from the dataset directory `datasets/rust/rust-keywords-0001` (field `task.dataset`,
 format — [06-data.md](06-data.md)). Checking the dataset:

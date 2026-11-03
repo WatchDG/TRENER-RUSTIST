@@ -69,10 +69,14 @@ fields depends on `kind`:
 - `completion` without a chat template is used for question–answer pairs of the form
   `Question: …\nAnswer: …` and for the replay corpus, whose prompt already contains the
   template. A prompt without BOS gets a BOS.
-- `qa` applies the chat template. Answers without reasoning in the template teach a
-  thinking model (LFM3) to close `<think>` immediately and to ignore `\boxed{}` from the
-  system prompt. In a trial run, option accuracy dropped from 0.3 to 0. Therefore the
-  builder writes pairs as `completion` by default (`--qa-format plain`).
+- `qa` applies the chat template. A record with `thinking` is rendered with its reasoning
+  (`<think>thinking</think>answer`, loss on both); a record without it — in the template's mode
+  without reasoning (`enable_thinking=False`): the empty reasoning (`<think></think>` of LFM3,
+  `</think>` of Spark-X2.6) goes into the prompt, and the loss is on the answer only. Answers
+  without reasoning teach a thinking model (LFM3) to skip the reasoning and to ignore `\boxed{}`
+  from the system prompt: in a trial run (when the model's turn still began with `</think>`),
+  option accuracy dropped from 0.3 to 0. Therefore the builder writes pairs as `completion` by
+  default (`--qa-format plain`).
 
 Corpus validation — `python -m trener data validate-corpus <directory>`: record fields,
 uniqueness of `id`, and `records` and `sha256` against the manifest. The

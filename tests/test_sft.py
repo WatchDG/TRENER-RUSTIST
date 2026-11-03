@@ -11,6 +11,7 @@ from typing import Any
 
 import numpy as np
 import pytest
+from trener.chat_format import NO_THINKING, thinking_end
 from trener.config import ConfigError, JoltConfig, OptimConfig, RunConfig, SftConfig, apply_overrides, validate_config
 from trener.corpus import (
     WINDOW_CONTEXT_TOKENS,
@@ -93,17 +94,30 @@ def test_long_text_is_windowed_not_truncated(tmp_path: Path, tokenizer: Any) -> 
     )
 
 
-def test_qa_record_follows_chat_template(tmp_path: Path, tokenizer: Any) -> None:
-    write_corpus(tmp_path, "demo", _records())
-    documents, _ = tokenize_records(load_corpus(tmp_path, "train"), tokenizer, max_tokens=512)
+@pytest.mark.parametrize("thinking", [None, "It is a method of Vec."])
+def test_qa_record_follows_chat_template(tmp_path: Path, chat_tokenizer: Any, thinking: str | None) -> None:
+    """The prompt is the template's generation prompt; a record without `thinking` is rendered without reasoning."""
+    records = _records()
+    if thinking is not None:
+        records["train"]["train.qa.jsonl"][0]["thinking"] = thinking
+    write_corpus(tmp_path, "demo", records)
+    documents, _ = tokenize_records(load_corpus(tmp_path, "train"), chat_tokenizer, max_tokens=512)
     qa = next(doc for doc in documents if doc.doc_id == "q0")
-    prompt = tokenizer.decode(qa.prompt.tolist(), skip_special_tokens=False)
-    completion = tokenizer.decode(qa.completion.tolist(), skip_special_tokens=False)
-    expected = tokenizer.apply_chat_template(
-        [{"role": "user", "content": "What does `Vec::push` do?"}], add_generation_prompt=True, tokenize=False
+    prompt = chat_tokenizer.decode(qa.prompt.tolist(), skip_special_tokens=False)
+    completion = chat_tokenizer.decode(qa.completion.tolist(), skip_special_tokens=False)
+    expected = chat_tokenizer.apply_chat_template(
+        [{"role": "user", "content": "What does `Vec::push` do?"}],
+        add_generation_prompt=True,
+        tokenize=False,
+        **({} if thinking is not None else NO_THINKING),
     )
     assert prompt == expected
-    assert "Appends an element" in completion and completion.endswith(tokenizer.eos_token)
+    end = thinking_end(chat_tokenizer)
+    if thinking is not None:
+        assert completion.startswith(thinking + end)
+    else:
+        assert end not in completion and completion.startswith("Appends")
+    assert "Appends an element" in completion and completion.endswith(chat_tokenizer.eos_token)
 
 
 def test_too_long_qa_is_dropped(tmp_path: Path, tokenizer: Any) -> None:

@@ -11,7 +11,8 @@ Per task:
 
 * ``correct`` — `trener.rewards.verify`: the last ``\\boxed{}`` matches the reference (the main metric);
 * ``flexible_correct`` — the last ``\\boxed{}`` or, without it, the last number of the answer after
-  ``</think>``: shows how much is lost on the answer format alone;
+  the end of the reasoning (``</think>``, read off the model's chat template by
+  `trener.chat_format.thinking_end`): shows how much is lost on the answer format alone;
 * ``truncated`` — the completion hit `max_new_tokens`.
 
 Report files (`write_report`), ``<label>`` — `step-<N>` during training or a name given to `bench run`:
@@ -41,6 +42,7 @@ from typing import TYPE_CHECKING, Any
 
 from . import __version__
 from .artifacts import _git_revision, _to_jsonable
+from .chat_format import thinking_end
 from .config import BENCH_ROOT, REPO_ROOT, BenchConfig, ConfigError, EvalConfig, benchmark_path
 from .data import MANIFEST_FILE, dataset_fingerprint, load_tasks, read_manifest
 from .evaluate import _select_tasks, generate_greedy
@@ -79,7 +81,6 @@ MAX_ANSWER_CHARS = 200
 #: Normal quantile of the two-sided 95% interval.
 Z95 = 1.959963984540054
 
-_THINK_END = "</think>"
 _NUMBER_RE = re.compile(r"[+-]?(?:\d[\d,]*(?:\.\d+)?|\.\d+)")
 
 
@@ -118,25 +119,33 @@ def resolve_benchmark(name: str | Path) -> Path:
     return path
 
 
-def flexible_answer(text: str) -> str | None:
-    """The last ``\\boxed{}``; without it, the last number of the answer (after ``</think>``, if present)."""
+def flexible_answer(text: str, reasoning_end: str | None = None) -> str | None:
+    """The last ``\\boxed{}``; without it, the last number of the answer (after `reasoning_end`, if present).
+
+    `reasoning_end` — the marker that closes the reasoning in the model's chat template (`thinking_end`, ``</think>``);
+    `None` — the template has no reasoning markup, the whole text is the answer.
+    """
     boxed = extract_boxed(text or "")
     if boxed is not None:
         return boxed
-    numbers = _NUMBER_RE.findall((text or "").rsplit(_THINK_END, 1)[-1])
+    text = text or ""
+    numbers = _NUMBER_RE.findall(text.rsplit(reasoning_end, 1)[-1] if reasoning_end else text)
     return numbers[-1] if numbers else None
 
 
 def score(
-    tasks: Sequence[Task], trajectories: Sequence[Trajectory], max_new_tokens: int
+    tasks: Sequence[Task],
+    trajectories: Sequence[Trajectory],
+    max_new_tokens: int,
+    reasoning_end: str | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]]]:
-    """Metrics, per-task results and completion texts of the measured tasks."""
+    """Metrics, per-task results and completion texts of the measured tasks (`reasoning_end` — `flexible_answer`)."""
     per_task: list[dict[str, Any]] = []
     completions: list[dict[str, Any]] = []
     for task, trajectory in zip(tasks, trajectories, strict=True):
         text = trajectory.text
         boxed = extract_boxed(text)
-        flexible = flexible_answer(text)
+        flexible = flexible_answer(text, reasoning_end)
         per_task.append(
             {
                 "task_id": task.task_id,
@@ -209,7 +218,9 @@ def run_benchmark(
         gc.collect()
         _release_cuda_cache()
     duration = time.perf_counter() - started
-    metrics, per_task, completions = score(selected, trajectories, int(section.max_new_tokens))
+    metrics, per_task, completions = score(
+        selected, trajectories, int(section.max_new_tokens), thinking_end(policy.tokenizer)
+    )
 
     fingerprint = dataset_fingerprint(path)
     info = dict(policy.info)

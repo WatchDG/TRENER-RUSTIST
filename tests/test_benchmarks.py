@@ -42,11 +42,24 @@ def _bench_dir(root: Path, name: str = "tinybench", n: int = 4) -> Path:
     return root / name
 
 
+class _ThinkingTemplate:
+    """Chat template stub: an assistant turn is `<think>reasoning</think>answer`."""
+
+    def apply_chat_template(self, conversation: list[dict[str, Any]], tokenize: bool = False, **kwargs: Any) -> str:
+        return "".join(
+            f"<think>{message.get('reasoning_content', '')}</think>{message['content']}"
+            if message["role"] == "assistant"
+            else message["content"]
+            for message in conversation
+        )
+
+
 def _fake_policy() -> Any:
     return SimpleNamespace(
         info={"model_path": "models/tiny", "lora": None, "torch": "x"},
         model_fingerprint="fp-tiny",
         reset_decoder=lambda: None,
+        tokenizer=_ThinkingTemplate(),
     )
 
 
@@ -96,9 +109,12 @@ def test_wilson_interval_and_mcnemar() -> None:
 
 
 def test_flexible_answer_prefers_boxed_then_last_number_after_thinking() -> None:
-    assert flexible_answer("so 3 and \\boxed{1,000}") == "1,000"
-    assert flexible_answer("think 7 </think> The answer is 42.") == "42"
-    assert flexible_answer("no digits here") is None
+    assert flexible_answer("so 3 and \\boxed{1,000}", "</think>") == "1,000"
+    assert flexible_answer("think 7 </think> The answer is 42.", "</think>") == "42"
+    assert flexible_answer("think 7 </think> no number", "</think>") is None
+    assert flexible_answer("no digits here", "</think>") is None
+    # a template without reasoning markup: the whole text is the answer
+    assert flexible_answer("think 7 </think> no number") == "7"
 
 
 def test_score_counts_strict_flexible_missing_and_truncated() -> None:
@@ -109,7 +125,7 @@ def test_score_counts_strict_flexible_missing_and_truncated() -> None:
         _trajectory("c", "\\boxed{6}", 10),  # wrong
         _trajectory("d", "thinking 7 forever", 64),  # truncated, no answer
     ]
-    metrics, per_task, completions = score(tasks, trajectories, max_new_tokens=64)
+    metrics, per_task, completions = score(tasks, trajectories, max_new_tokens=64, reasoning_end="</think>")
     assert metrics["n"] == 4 and metrics["correct"] == 1
     assert metrics["accuracy"] == pytest.approx(0.25)
     assert metrics["accuracy_flexible"] == pytest.approx(0.75)  # a, b and the last number 7 of d

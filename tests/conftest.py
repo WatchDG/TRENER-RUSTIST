@@ -10,6 +10,9 @@ import pytest
 #: Directory of the local test model checkpoint.
 MODEL_PATH = Path(__file__).resolve().parents[1] / "models" / "LFM3-1.7B"
 
+#: Directory of the local Spark-X2.6 checkpoint (may be absent in CI).
+SPARK_PATH = Path(__file__).resolve().parents[1] / "models" / "Spark-X2.6-1.7B"
+
 
 @pytest.fixture(scope="session")
 def project_root() -> Path:
@@ -31,6 +34,22 @@ def tokenizer() -> Any:
     if not (MODEL_PATH / "tokenizer_config.json").is_file():
         pytest.skip(f"LFM3 tokenizer is unavailable: {MODEL_PATH}")
     return AutoTokenizer.from_pretrained(str(MODEL_PATH), trust_remote_code=True)
+
+
+@pytest.fixture(scope="session")
+def spark_tokenizer() -> Any:
+    """Spark-X2.6 tokenizer: a chat template whose reasoning markup differs from LFM3's."""
+    from transformers import AutoTokenizer
+
+    if not (SPARK_PATH / "tokenizer_config.json").is_file():
+        pytest.skip(f"Spark-X2.6 tokenizer is unavailable: {SPARK_PATH}")
+    return AutoTokenizer.from_pretrained(str(SPARK_PATH))
+
+
+@pytest.fixture(params=["lfm3", "spark"])
+def chat_tokenizer(request: pytest.FixtureRequest) -> Any:
+    """Tokenizers of both chat templates: LFM3 and Spark-X2.6."""
+    return request.getfixturevalue("tokenizer" if request.param == "lfm3" else "spark_tokenizer")
 
 
 @pytest.fixture(scope="session")

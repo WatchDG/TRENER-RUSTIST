@@ -35,7 +35,7 @@ with the run's generation engine (`rollout.engine`). The path is the same as the
 |---|---|
 | `accuracy` | share of tasks whose last `\boxed{}` matches the reference (`trener.rewards.verify`: numbers are compared numerically, `1,000` = `1000`); the main metric |
 | `accuracy_ci95` | 95% Wilson score interval of `accuracy` |
-| `accuracy_flexible` | the last `\boxed{}` or, without it, the last number of the answer after `</think>`: the gap to `accuracy` is what the answer format alone costs |
+| `accuracy_flexible` | the last `\boxed{}` or, without it, the last number of the answer after the end of the reasoning (`</think>`, read off the model's chat template, `trener.chat_format.thinking_end`): the gap to `accuracy` is what the answer format alone costs |
 | `no_answer_rate` | share of answers without `\boxed{}` |
 | `truncated_rate` | share of completions that hit `max_new_tokens` (a thinking model needs room: raise `bench.max_new_tokens` when it is high) |
 | `mean_completion_tokens` | mean completion length |

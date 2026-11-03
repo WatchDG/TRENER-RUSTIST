@@ -6,7 +6,8 @@ for the splits. A record is one document about one item (``item``, for example
 
 * ``text`` — raw text (``text``, optional ``title``): loss on the whole text;
 * ``qa`` — a question and an answer in the model's chat template (``question``, ``answer``,
-  optional ``system`` and ``thinking``): loss only on the model's turn;
+  optional ``system`` and ``thinking``): loss only on the model's turn; a record without ``thinking`` is
+  rendered in the template's mode without reasoning (`trener.chat_format.NO_THINKING`);
 * ``completion`` — prompt and response strings as they are, without the chat template (``prompt``,
   ``completion``): loss on the response. This is how plain-text "Question/Answer" pairs
   and repetitions of the model's own answers are written (a prompt with the template
@@ -39,6 +40,7 @@ from typing import Any
 
 import numpy as np
 
+from .chat_format import NO_THINKING
 from .data import DataError
 
 logger = logging.getLogger(__name__)
@@ -330,16 +332,23 @@ def _array(tokens: Sequence[int]) -> np.ndarray:
 
 
 def _chat_pair(tokenizer: Any, fields: Mapping[str, str]) -> tuple[str, str]:
-    """Prompt (up to the model's turn) and the model's turn for a ``qa`` record via the model's chat template."""
+    """Prompt (up to the model's turn) and the model's turn for a ``qa`` record via the model's chat template.
+
+    A record without ``thinking`` is rendered in the template's mode without reasoning: the empty reasoning goes
+    into the prompt (`<think></think>` of LFM3, `</think>` of Spark-X2.6), and the model's turn is the answer.
+    """
     messages: list[dict[str, Any]] = []
     if fields.get("system"):
         messages.append({"role": "system", "content": fields["system"]})
     messages.append({"role": "user", "content": fields["question"]})
     answer: dict[str, Any] = {"role": "assistant", "content": fields["answer"]}
+    options: dict[str, Any] = {}
     if "thinking" in fields:
         answer["reasoning_content"] = fields["thinking"]
-    prompt = tokenizer.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
-    full = tokenizer.apply_chat_template([*messages, answer], tokenize=False).rstrip()
+    else:
+        options = NO_THINKING
+    prompt = tokenizer.apply_chat_template(messages, add_generation_prompt=True, tokenize=False, **options)
+    full = tokenizer.apply_chat_template([*messages, answer], tokenize=False, **options).rstrip()
     if not full.startswith(prompt):
         raise DataError(
             "the chat template does not continue the prompt with the assistant turn — cannot build the qa record"
