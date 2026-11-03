@@ -46,10 +46,10 @@ serves as the teacher if privileged information $c$ (a verified answer, a refere
 solution, feedback, a reference trace) is placed in its context:
 
 $$
-\mathcal{J}_{\mathrm{OPSD}}(\theta;\bar\theta) = -\,\mathbb{E}_{\tau\sim\pi_{\bar\theta}}\left[\sum_t \mathrm{KL}\bigl(\pi_\theta(\cdot\mid s_t)\,\big\|\,\operatorname{sg}[\pi_{\bar\theta}(\cdot\mid s_t,c)]\bigr)\right]
+\mathcal{J}_{\mathrm{OPSD}}(\theta;\bar\theta) = -\,\mathbb{E}_{\tau\sim\pi_{\bar\theta}}\left[\sum_t \mathrm{KL}\bigl(\pi_\theta(\cdot\mid s_t)\,\big\|\,\mathrm{sg}[\pi_{\bar\theta}(\cdot\mid s_t,c)]\bigr)\right]
 $$
 
-Here $\operatorname{sg}$ is stop-gradient. Tokens that the teacher prefers are
+Here $\mathrm{sg}$ is stop-gradient. Tokens that the teacher prefers are
 reinforced; tokens that the teacher considers less likely than the student are
 suppressed.
 
@@ -137,7 +137,7 @@ practical surrogate is the centered return values from the teacher's **own**
 trajectories:
 
 $$
-\mathcal{J}_T(\theta;\bar\theta) = \mathbb{E}_{\tau\sim\pi_{\bar\theta}(\cdot\mid c)}\left[\sum_t \left(\operatorname{sg}[\widehat{A}(\tau)]\log\pi_\theta(a_t\mid s_t,c) - \beta_T\,\mathrm{KL}\bigl(\pi_\theta(\cdot\mid s_t,c)\,\big\|\,\operatorname{sg}[\pi_{\bar\theta}(\cdot\mid s_t)]\bigr)\right)\right]
+\mathcal{J}_T(\theta;\bar\theta) = \mathbb{E}_{\tau\sim\pi_{\bar\theta}(\cdot\mid c)}\left[\sum_t \left(\mathrm{sg}[\widehat{A}(\tau)]\log\pi_\theta(a_t\mid s_t,c) - \beta_T\,\mathrm{KL}\bigl(\pi_\theta(\cdot\mid s_t,c)\,\big\|\,\mathrm{sg}[\pi_{\bar\theta}(\cdot\mid s_t)]\bigr)\right)\right]
 $$
 
 - the reward term teaches the teacher to solve the task;
@@ -161,7 +161,7 @@ information, and the update penalizes the reverse KL between the student and thi
 privileged teacher in every visited state:
 
 $$
-\mathcal{J}_{\mathrm{OPSD}}(\theta;\bar\theta) = -\,\mathbb{E}_{\tau\sim\pi_{\bar\theta}}\left[\sum_t \mathrm{KL}\bigl(\pi_\theta(\cdot\mid s_t)\,\big\|\,\operatorname{sg}[\pi_{\bar\theta}(\cdot\mid s_t,c)]\bigr)\right]
+\mathcal{J}_{\mathrm{OPSD}}(\theta;\bar\theta) = -\,\mathbb{E}_{\tau\sim\pi_{\bar\theta}}\left[\sum_t \mathrm{KL}\bigl(\pi_\theta(\cdot\mid s_t)\,\big\|\,\mathrm{sg}[\pi_{\bar\theta}(\cdot\mid s_t,c)]\bigr)\right]
 $$
 
 ## 1.7 Combined objective
@@ -175,7 +175,7 @@ $\beta_S$ is the weight of the student's distillation loss in the total update.
 **JOLT+** adds the student's own outcome reward to the update:
 
 $$
-\mathcal{J}_{\mathrm{JOLT+}}(\theta;\bar\theta) = \mathcal{J}_T(\theta;\bar\theta) + \beta_S\,\mathcal{J}_{\mathrm{OPSD}}(\theta;\bar\theta) + \mathbb{E}_{\tau\sim\pi_{\bar\theta}}\left[\sum_t \operatorname{sg}[\widehat{A}_S(\tau)]\,\log\pi_\theta(a_t\mid s_t)\right]
+\mathcal{J}_{\mathrm{JOLT+}}(\theta;\bar\theta) = \mathcal{J}_T(\theta;\bar\theta) + \beta_S\,\mathcal{J}_{\mathrm{OPSD}}(\theta;\bar\theta) + \mathbb{E}_{\tau\sim\pi_{\bar\theta}}\left[\sum_t \mathrm{sg}[\widehat{A}_S(\tau)]\,\log\pi_\theta(a_t\mid s_t)\right]
 $$
 
 The teacher's objective does not change. $\widehat{A}_S(\tau)$ is the centered
@@ -197,13 +197,13 @@ $$
 Then the token-level weights are:
 
 $$
-\widehat{A}_t^{T} = \operatorname{sg}\!\left[\widehat{A}(\tau) - \beta_T\Delta_t^{\bar\theta}\right], \qquad \widehat{A}_t^{S} = \operatorname{sg}\!\left[\beta_S\Delta_t^{\bar\theta}\right]
+\widehat{A}_t^{T} = \mathrm{sg}\!\left[\widehat{A}(\tau) - \beta_T\Delta_t^{\bar\theta}\right], \qquad \widehat{A}_t^{S} = \mathrm{sg}\!\left[\beta_S\Delta_t^{\bar\theta}\right]
 $$
 
 For the JOLT+ student weight:
 
 $$
-\widehat{A}_t^{S+} = \operatorname{sg}\!\left[\widehat{A}(\tau) + \beta_S\Delta_t^{\bar\theta}\right]
+\widehat{A}_t^{S+} = \mathrm{sg}\!\left[\widehat{A}(\tau) + \beta_S\Delta_t^{\bar\theta}\right]
 $$
 
 The log-probability ratio of the current token reproduces, on average over fixed

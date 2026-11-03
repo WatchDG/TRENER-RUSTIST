@@ -29,11 +29,11 @@ Semantic correspondences (cross-check with the formulas from [01-jolt.md](01-jol
 | `student = policy.generate([task])` | $\tau\sim\pi_{\bar\theta}$ | Student trajectories: context **without** privileged information |
 | `student_lp = policy.score([task], teacher.tokens)` | $\log\pi_{\bar\theta}(a_t\mid s_t)$ | Teacher's tokens, scored by the **student** (no hint) |
 | `teacher_lp = policy.score([task, hint], student.tokens)` | $\log\pi_{\bar\theta}(a_t\mid s_t,c)$ | Student's tokens, scored by the **teacher** (with hint) |
-| `teacher.adv += advantage(teacher)` | $\operatorname{sg}[\widehat{A}(\tau)]$ | Centered return of the teacher (group of $G$ siblings) |
+| `teacher.adv += advantage(teacher)` | $\mathrm{sg}[\widehat{A}(\tau)]$ | Centered return of the teacher (group of $G$ siblings) |
 | `teacher.adv += beta_T * (student_lp - teacher.logprobs)` | $-\beta_T\Delta_t^{\bar\theta}$ | Teacher KL regularization: do not drift away from the student |
 | `student.adv += beta_S * (teacher_lp - student.logprobs)` | $+\beta_S\Delta_t^{\bar\theta}$ | Distillation signal from the teacher |
-| `student.adv += advantage(student)` | $\operatorname{sg}[\widehat{A}_S(\tau)]$ | **JOLT+** only: the student's own outcome reward |
-| `policy.update([teacher, student])` | $\mathcal{J}_{\mathrm{JOLT}}$ / $\mathcal{J}_{\mathrm{JOLT+}}$ | A single update of the **shared** parameters |
+| `student.adv += advantage(student)` | $\mathrm{sg}[\widehat{A}_S(\tau)]$ | **JOLT+** only: the student's own outcome reward |
+| `policy.update([teacher, student])` | $`\mathcal{J}_{\mathrm{JOLT}}`$ / $`\mathcal{J}_{\mathrm{JOLT+}}`$ | A single update of the **shared** parameters |
 
 `teacher.logprobs` are the log-probabilities of the teacher's own tokens under
 the privileged context; `student.logprobs` are the log-probabilities of the
@@ -65,7 +65,7 @@ $\Delta_t^{\bar\theta}$ and $-\Delta_t^{\bar\theta}$ for the corresponding branc
 - **On-policy roles.** Teacher trajectories are used only to update the teacher
   branch, student trajectories only for the student branch. Cross-scoring is
   used to compute weights, not for generation.
-- **Shared parameters.** The update is single: $\mathcal{J}_T + \beta_S\mathcal{J}_{\mathrm{OPSD}}$
+- **Shared parameters.** The update is single: $`\mathcal{J}_T + \beta_S\mathcal{J}_{\mathrm{OPSD}}`$
   (+ the student reward term in JOLT+). No separate "heads" or adapters.
 - **Stop-gradient.** $\widehat{A}$, $\Delta_t^{\bar\theta}$, and the teacher's
   log-probabilities in the KL term are constants when differentiating.

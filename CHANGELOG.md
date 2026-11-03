@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-11-03
+
+### Fixed
+
+- Formulas in `docs/01-jolt.md`, `docs/02-algorithm.md` and `docs/04-implementation.md`: the stop-gradient
+  operator is `\mathrm{sg}` instead of `\operatorname{sg}`, and formulas inside Markdown tables are in code
+  spans, so the table pipes do not break the `$…$` rendering.
+
 ## [0.4.0] - 2026-11-03
 
 ### Added
@@ -93,7 +101,8 @@ First release.
 - Tests that need the LFM3 tokenizer are skipped when `models/LFM3-1.7B` is
   absent instead of failing.
 
-[Unreleased]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.1.0...v0.2.0

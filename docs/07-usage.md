@@ -58,7 +58,7 @@ Checking the environment:
 .venv\Scripts\python.exe -c "import trener; print(trener.__version__)"
 ```
 
-Expected: `2.13.0+cu130 13.0 True` and `0.4.0`.
+Expected: `2.13.0+cu130 13.0 True` and `0.4.1`.
 
 Data: the presets read tasks from the dataset directory `datasets/rust/rust-keywords-0001` (field `task.dataset`,
 format — [06-data.md](06-data.md)). Checking the dataset:

@@ -41,7 +41,7 @@ There is no code in the repository yet.
 | **Rollout engine** | Parallel generation of $G$ trajectories per role and per task |
 | **Cross-scorer** | Scoring of one role's tokens in the other role's context (without gradient) |
 | **Advantage assembler** | Centering of returns within a group, assembly of $\widehat{A}_t$ |
-| **Optimizer** | One update of $\mathcal{J}_T + \beta_S\mathcal{J}_{\mathrm{OPSD}} (+ reward)$ |
+| **Optimizer** | One update of $`\mathcal{J}_T + \beta_S\mathcal{J}_{\mathrm{OPSD}}`$ (+ reward) |
 | **Token accounting** | Separate accounting of completion and processed tokens |
 | **Checkpoint / eval / logging** | Final checkpoint, curves, metrics, summary tables |
 
