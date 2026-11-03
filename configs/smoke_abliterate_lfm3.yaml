@@ -1,0 +1,23 @@
+# Smoke preset for abliteration (docs/10-abliteration.md): the example prompt set, 4 Optuna trials, short answers.
+# Checks the pipeline end to end: directions, study, export of checkpoints/final and model/.
+# The example set is too small for a usable refusal direction: for an experiment use configs/abliterate_lfm3.yaml
+# with your own prompt set.
+run:
+  name: smoke_abliterate_lfm3
+  seed: 0
+  out_dir: runs
+method: abliterate
+model:
+  path: models/LFM3-1.7B
+  dtype: bfloat16
+  trust_remote_code: true
+  attn_implementation: sdpa
+  compile_kernels: true
+rollout:
+  engine: static
+abliteration:
+  prompts: datasets/abliteration/example-0001
+  max_new_tokens: 32
+  batch_size: 16
+  n_trials: 4
+  n_startup_trials: 2

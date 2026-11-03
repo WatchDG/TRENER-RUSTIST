@@ -1,0 +1,28 @@
+{
+  "format": "abliteration-prompts",
+  "format_version": 1,
+  "name": "example-0001",
+  "description": "Format example of an abliteration-prompts set: topic-matched pairs (medical over-refusal and one general pair). Too small for a usable direction; replace it with your own set.",
+  "source": "written by hand for docs/10-abliteration.md",
+  "system_prompt": "",
+  "splits": {
+    "train": {
+      "files": [
+        {
+          "file": "train.jsonl",
+          "records": 10,
+          "sha256": "b226e7de1313f89fe5bf155f66b35a0e8aebf217e9369e02431adb0c1e567e46"
+        }
+      ]
+    },
+    "test": {
+      "files": [
+        {
+          "file": "test.jsonl",
+          "records": 4,
+          "sha256": "e3376cec525a4630e07a50e4022a7c6bf17abb1c3ab194b5dfd971b3ddceaef3"
+        }
+      ]
+    }
+  }
+}

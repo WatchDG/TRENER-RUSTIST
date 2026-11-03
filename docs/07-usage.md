@@ -58,7 +58,7 @@ Checking the environment:
 .venv\Scripts\python.exe -c "import trener; print(trener.__version__)"
 ```
 
-Expected: `2.13.0+cu130 13.0 True` and `0.3.0`.
+Expected: `2.13.0+cu130 13.0 True` and `0.4.0`.
 
 Data: the presets read tasks from the dataset directory `datasets/rust/rust-keywords-0001` (field `task.dataset`,
 format — [06-data.md](06-data.md)). Checking the dataset:
@@ -84,6 +84,8 @@ The dialogue where "the model asks a question and evaluates the user's answer" (
 | `configs/smoke_tutor_rust_jolt.yaml` | `jolt` | short run of the tutor mode: 3 steps, `B=2`, `G=2`, `max_new_tokens=128`, `eval.limit=8` |
 | `configs/smoke_lora_rust_keywords_jolt.yaml` | `jolt` | smoke run with LoRA: frozen base, rank-16 adapters on all linear layers, `lr=1e-5` ([09-lora.md](09-lora.md)) |
 | `configs/smoke_qlora_rust_keywords_jolt.yaml` | `jolt` | the same smoke run with QLoRA: the frozen base in 4-bit NF4 ([09-lora.md §7](09-lora.md)) |
+| `configs/smoke_abliterate_lfm3.yaml` | `abliterate` | abliteration check on the example prompt set: 4 Optuna trials, `max_new_tokens=32` ([10-abliteration.md](10-abliteration.md)) |
+| `configs/abliterate_lfm3.yaml` | `abliterate` | ablation of the refusal direction: 100 trials (30 random), `max_new_tokens=100`; `abliteration.prompts` is your own set ([10-abliteration.md](10-abliteration.md)) |
 | `configs/rust_std/rust_std_io_jolt_b16.yaml` | `jolt` | variant of `rust_std_io_jolt.yaml` with 128 rollout rows: `B=16`, `G=4`, `generation_batch_size=128`, 5 epochs (55 steps), evaluation every 10 steps; the recipe differs from the article (§7.12) |
 
 `configs/sequence_rust.yaml` and `configs/sequence_rust_cargo.yaml` are not run presets but sequence configs: the first runs `rust_keywords`, `rust_traits`, `rust_macros` and 49 `rust-std-module-*` sets (`rust_std/`, except the `rust_std_io_jolt_b16` variant) in a chain (model in `dist/rust-0001`), the second runs nine `rust-cargo-*` (crate) sets in a chain (model in `dist/rust-cargo-0001`, §7.6).
@@ -203,6 +205,8 @@ runs/<name>/
   bench.json             # only for `python -m trener bench`: step metrics and phase medians
   summary.md             # summary table of the run
 ```
+
+A `method: abliterate` run has its own layout (directions, the Optuna study, `checkpoints/final`, `model/`): [10-abliteration.md §5](10-abliteration.md).
 
 | Metric | Meaning |
 |---|---|
@@ -663,6 +667,7 @@ unit of time matters more than the number of updates.
 
 ## Next
 
+- Abliteration (`method: abliterate`) → [10-abliteration.md](10-abliteration.md)
 - Formalization of the approach → [01-jolt.md](01-jolt.md)
 - Training step → [02-algorithm.md](02-algorithm.md)
 - Requirements for the code → [04-implementation.md](04-implementation.md)

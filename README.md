@@ -69,8 +69,8 @@ Presets, evaluation, resume and the run directory layout: [docs/07-usage.md](doc
 | Path | Contents |
 |---|---|
 | `trener/` | The pipeline package (`python -m trener`) |
-| `configs/` | Training presets (`smoke_*` — short checks, `rust_std/`, `rust_cargo/`, `sft_*`, `sequence_*`) |
-| `datasets/` | Task sets (`rust/`, `reverse-rust/`) and documentation corpora (`rust-docs/`), see [docs/06-data.md](docs/06-data.md) |
+| `configs/` | Training presets (`smoke_*` — short checks, `rust_std/`, `rust_cargo/`, `sft_*`, `sequence_*`, `abliterate_*`) |
+| `datasets/` | Task sets (`rust/`, `reverse-rust/`), documentation corpora (`rust-docs/`) and a contrast prompt set example (`abliteration/`), see [docs/06-data.md](docs/06-data.md) |
 | `scripts/` | Dataset and corpus builders, profiling and memory tools, `chat.py` |
 | `tests/` | `pytest` suite (`-m slow` — integration tests on the real model) |
 | `docs/` | Method and pipeline documentation |
@@ -88,6 +88,7 @@ Presets, evaluation, resume and the run directory layout: [docs/07-usage.md](doc
 | [docs/07-usage.md](docs/07-usage.md) | Running the pipeline: environment, presets, training, artifacts, resume, limitations |
 | [docs/08-sft.md](docs/08-sft.md) | The `sft` stage before JOLT: training on a pre-built documentation corpus (rustdoc JSON), coverage and NLL |
 | [docs/09-lora.md](docs/09-lora.md) | Optional LoRA and QLoRA: frozen (optionally 4-bit NF4) base and low-rank adapters for any method, fine-tuning and continuing an adapter |
+| [docs/10-abliteration.md](docs/10-abliteration.md) | Abliteration for experiments: ablating the refusal direction from the weights, Optuna search on refusal rate and KL, contrast prompt sets |
 
 ## Supported models
 

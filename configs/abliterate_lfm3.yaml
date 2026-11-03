@@ -1,0 +1,35 @@
+# Preset: ablation of the refusal direction from LFM3-1.7B (docs/10-abliteration.md), for experiments and study.
+# Replace abliteration.prompts with your own abliteration-prompts set (hundreds of topic-matched bad/good pairs,
+# train for the direction and a held-out test for the trials); check it first:
+#   python -m trener data validate-prompts <dir>
+# A repeated run with the same run.name continues the study up to n_trials and exports the chosen trial again;
+# another trial: --set abliteration.trial=<number> (numbers and objectives are in runs/<name>/pareto.json).
+run:
+  name: abliterate_lfm3
+  seed: 0
+  out_dir: runs
+method: abliterate
+model:
+  path: models/LFM3-1.7B
+  dtype: bfloat16
+  trust_remote_code: true
+  attn_implementation: sdpa
+  compile_kernels: true
+rollout:
+  engine: static
+abliteration:
+  prompts: datasets/abliteration/example-0001
+  direction_split: train
+  eval_split: test
+  eval_limit: 100
+  system_prompt: ""
+  enable_thinking: false     # the generation prompt ends with an empty think block: a refusal shows in the first tokens
+  max_new_tokens: 100
+  batch_size: 32
+  orthogonalize_direction: true
+  row_normalization: full    # none | pre | full (rows keep their original norms)
+  n_trials: 100
+  n_startup_trials: 30
+  max_kl: 1.0                # the chosen trial: the lowest refusal rate among the Pareto trials with KL ≤ max_kl
+  trial: -1
+  refusal_markers: []        # empty — the built-in English and Russian list (trener/refusal.py)

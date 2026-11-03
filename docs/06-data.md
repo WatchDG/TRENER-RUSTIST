@@ -244,6 +244,10 @@ The commands are the same as in §6.6: `trener data validate datasets/reverse-ru
 presets `configs/tutor_rust_jolt.yaml` and `configs/smoke_tutor_rust_jolt.yaml`. Evaluation (`trener eval`)
 runs the same dialogue greedily and puts the model's question, the reply and the evaluation into `per_task[*].turns`.
 
+## 6.9 Contrast prompts for abliteration
+
+`method: abliterate` reads a different format, `abliteration-prompts`: a `prompts.json` manifest and JSONL records of `bad`/`good` prompt pairs without answers (`id`, `bad`, `good`, `meta`). The format, the `data validate-prompts` command and the example `datasets/abliteration/example-0001` are described in [10-abliteration.md §2](10-abliteration.md).
+
 ## Next
 
 - Privileged information by testbed from the article → [04-implementation.md §4.5](04-implementation.md)

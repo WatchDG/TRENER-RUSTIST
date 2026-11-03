@@ -1,5 +1,7 @@
 """CLI of the pipeline: `python -m trener {train,sequence,bench,eval,summarize,data}`.
 
+`train` runs every method of the config, including `sft` and `abliterate` (`trener/abliteration.py`).
+
 Exit codes: 0 — success, 1 — configuration/environment error.
 """
 
@@ -17,7 +19,15 @@ from pathlib import Path
 from typing import Any
 
 from . import __version__
-from .config import SFT_METHOD, ConfigError, JoltConfig, apply_overrides, load_config, resolve_eval_batch_size
+from .config import (
+    ABLITERATE_METHOD,
+    SFT_METHOD,
+    ConfigError,
+    JoltConfig,
+    apply_overrides,
+    load_config,
+    resolve_eval_batch_size,
+)
 
 logger = logging.getLogger("trener")
 
@@ -113,6 +123,10 @@ def run_training(
         from .sft import run_sft
 
         return run_sft(cfg, init_from=init_from, resume=resume)
+    if cfg.method == ABLITERATE_METHOD:
+        from .abliteration import run_abliteration
+
+        return run_abliteration(cfg, init_from=init_from, resume=resume)
 
     from .artifacts import RunArtifacts
     from .data import dataset_fingerprint, load_tasks
@@ -298,6 +312,8 @@ def cmd_bench(args: argparse.Namespace) -> int:
     cfg = _load(args)
     if cfg.method == SFT_METHOD:
         raise ConfigError("bench measures a JOLT step; for sft look at update_tok_s in the run's metrics.jsonl")
+    if cfg.method == ABLITERATE_METHOD:
+        raise ConfigError("bench measures a JOLT step; abliterate logs trial_s per trial in the run's metrics.jsonl")
     result = run_bench(cfg, int(args.steps))
     print(format_table(result))
     return 0
@@ -351,6 +367,13 @@ def cmd_summarize(args: argparse.Namespace) -> int:
     if not run_dir.exists():
         logger.error("run directory not found: %s", run_dir)
         return 1
+    from .abliteration import RESULT_FILE, write_summary
+
+    if (run_dir / RESULT_FILE).is_file():  # abliteration run: trials instead of steps
+        summary = write_summary(run_dir)
+        logger.info("summary: %s", summary)
+        print(summary.read_text(encoding="utf-8"))
+        return 0
     artifacts = RunArtifacts(run_dir)
     curves = artifacts.write_curves()
     summary = artifacts.write_summary()
@@ -443,6 +466,27 @@ def cmd_data_validate_corpus(args: argparse.Namespace) -> int:
             )
     if args.config:
         _print_corpus_plan(args)
+    return 0
+
+
+def cmd_data_validate_prompts(args: argparse.Namespace) -> int:
+    """Validates an `abliteration-prompts` set: format, ids, seal; prints pairs and prompts shared by splits."""
+    from .prompt_sets import update_prompts_manifest, validate_prompt_set
+
+    if args.update_manifest:
+        update_prompts_manifest(args.path, name=args.name)
+        logger.info("prompt set manifest %s updated", args.path)
+    summary = validate_prompt_set(args.path)
+    print(f"prompt set: {summary.name} ({args.path})")
+    if summary.system_prompt:
+        print(f"  system prompt: {summary.system_prompt!r}")
+    for split, counts in summary.splits.items():
+        print(
+            f"  {split}: records {counts['records']} (pairs {counts['pairs']}, bad only {counts['bad_only']}, "
+            f"good only {counts['good_only']}); prompt length ≤ {counts['max_chars']} characters"
+        )
+    for (first, second), shared in summary.overlap.items():
+        print(f"  warning: {shared} identical prompts in {first} and {second}")
     return 0
 
 
@@ -586,6 +630,17 @@ def build_parser() -> argparse.ArgumentParser:
     corpus.add_argument("--config", default=None, help="sft config: tokens, windows and epoch size in steps")
     corpus.add_argument("--set", action="append", default=None, metavar="KEY=VALUE", help="config override")
     corpus.set_defaults(func=cmd_data_validate_corpus)
+    prompts = actions.add_parser(
+        "validate-prompts", help="validate a contrast prompt set for abliterate (docs/10-abliteration.md)"
+    )
+    prompts.add_argument("path", help="prompt set directory (prompts.json and split files)")
+    prompts.add_argument(
+        "--update-manifest",
+        action="store_true",
+        help="recompute records and sha256 (creates prompts.json from train.jsonl/test.jsonl if missing)",
+    )
+    prompts.add_argument("--name", default=None, help="prompt set name when creating or updating the manifest")
+    prompts.set_defaults(func=cmd_data_validate_prompts)
     replay = actions.add_parser("make-replay", help="replay corpus: the model's correct answers on a task dataset")
     replay.add_argument("--config", required=True, help="config: model, generation engine, seed")
     replay.add_argument(

@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-03
+
+### Added
+
+- `method: abliterate` (`trener/abliteration.py`, `docs/10-abliteration.md`) for experiments and study: the refusal direction is the difference of the mean residual activations on contrast `bad`/`good` prompts, and a trial projects it out of the output projections of the layers (`conv.out_proj` / `self_attn.o_proj` and `feed_forward.w2`), with the direction scaled by the LFM3 post-norm gain so that it leaves the residual stream despite the sandwich norm; `row_normalization: none|pre|full`, optional projection of the `good` mean out of the direction. An Optuna TPE study (`optuna.jsonl`, continued by a repeated run) minimizes the refusal rate (`trener/refusal.py`, English and Russian markers) and the first-token KL; the chosen Pareto trial is exported as `checkpoints/final` and the loadable `model/` with a change notice. Run via `train`, works in `sequence` and with `--init-from`; presets `configs/smoke_abliterate_lfm3.yaml`, `configs/abliterate_lfm3.yaml`.
+- The `abliteration-prompts` format of contrast prompt sets (`trener/prompt_sets.py`) with `python -m trener data validate-prompts [--update-manifest]` and the example `datasets/abliteration/example-0001`.
+- Dependency `optuna==5.0.0` (with `alembic`, `colorlog`, `Mako`, `SQLAlchemy`).
+
 ## [0.3.0] - 2026-11-03
 
 ### Added
@@ -85,7 +93,8 @@ First release.
 - Tests that need the LFM3 tokenizer are skipped when `models/LFM3-1.7B` is
   absent instead of failing.
 
-[Unreleased]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/WatchDG/TRENER-RUSTIST/releases/tag/v0.1.0

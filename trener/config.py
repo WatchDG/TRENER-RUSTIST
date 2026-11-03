@@ -19,10 +19,14 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 #: Pipeline methods: `jolt`/`jolt+` — the main methods, `opsd`/`grpo` — rows of the
 #: same table of token weights (see docs/01-jolt.md §1.8).
-METHODS = ("jolt", "jolt+", "opsd", "grpo", "sft")
+METHODS = ("jolt", "jolt+", "opsd", "grpo", "sft", "abliterate")
 
 #: Method without rollout: teacher-forced training on the documentation corpus (`trener/sft.py`, `docs/08-sft.md`).
 SFT_METHOD = "sft"
+
+#: Method without training: ablation of the refusal direction from the weights (`trener/abliteration.py`,
+#: `docs/10-abliteration.md`).
+ABLITERATE_METHOD = "abliterate"
 
 #: Methods with a teacher branch (two groups of generations).
 TEACHER_METHODS = ("jolt", "jolt+")
@@ -50,6 +54,10 @@ MASTER_STORAGES = ("fp32", "split")
 
 #: Quantization of the frozen base under LoRA: `none` — bf16, `nf4` — 4-bit NormalFloat (QLoRA, `trener/quant.py`).
 QUANTIZATIONS = ("none", "nf4")
+
+#: Row normalization of an ablated weight (`trener/abliteration.py`): `none` — plain projection, `pre` — projection
+#: of the row-normalized weight, `full` — `pre` with every row brought back to its original norm.
+ROW_NORMALIZATIONS = ("none", "pre", "full")
 
 #: `eval.batch_size` modes: `manual` — value from the config, `auto` — from the test size at config load.
 EVAL_BATCH_MODES = ("auto", "manual")
@@ -355,6 +363,68 @@ class SftConfig:
 
 
 @dataclass
+class AbliterationConfig:
+    """Ablation of the refusal direction from the weights (`method: abliterate`, `docs/10-abliteration.md`).
+
+    The direction is the difference of the mean residual activations on the `bad` and `good` prompts of
+    the `abliteration-prompts` set; it is projected out of the output projections of the layers
+    (operator and MLP). The ablation parameters are searched with Optuna TPE on two objectives: the refusal
+    rate on the `bad` prompts and the KL divergence of the first token on the `good` prompts.
+    """
+
+    #: Directory of the `abliteration-prompts` set (`trener/prompt_sets.py`); required when `method: abliterate`.
+    prompts: Path = UNSET_PATH
+    #: Split the refusal direction is computed on.
+    direction_split: str = "train"
+    #: Split the trials are evaluated on (refusal rate on `bad`, KL on `good`).
+    eval_split: str = "test"
+    #: At most this many `bad` and this many `good` prompts of `eval_split`.
+    eval_limit: int = 100
+    #: System prompt of every prompt (empty — the set's `system_prompt`, if any, else none).
+    system_prompt: str = ""
+    #: `enable_thinking` of the chat template: false — the generation prompt ends with an empty think block,
+    #: and a refusal shows in the first tokens of the answer.
+    enable_thinking: bool = False
+    #: Answer length for the refusal check.
+    max_new_tokens: int = 100
+    #: Prompts per forward pass when collecting activations and first-token logits.
+    batch_size: int = 32
+    #: Project the mean `good` activation out of the direction (removes the part shared with ordinary prompts).
+    orthogonalize_direction: bool = True
+    #: Row normalization of the ablated weights (`ROW_NORMALIZATIONS`).
+    row_normalization: str = "full"
+    #: Optuna trials in the study (a repeated run with the same `run.name` continues the study up to this count).
+    n_trials: int = 100
+    #: Random trials before TPE starts modelling.
+    n_startup_trials: int = 30
+    #: Trial selection: the lowest refusal rate among the Pareto trials with KL ≤ `max_kl`.
+    max_kl: float = 1.0
+    #: Number of the trial to export (−1 — chosen by `max_kl`).
+    trial: int = -1
+    #: Refusal markers (substrings, case-insensitive); empty — the built-in list (`trener/refusal.py`).
+    refusal_markers: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "prompts": str(self.prompts),
+            "direction_split": self.direction_split,
+            "eval_split": self.eval_split,
+            "eval_limit": self.eval_limit,
+            "system_prompt": self.system_prompt,
+            "enable_thinking": self.enable_thinking,
+            "max_new_tokens": self.max_new_tokens,
+            "batch_size": self.batch_size,
+            "orthogonalize_direction": self.orthogonalize_direction,
+            "row_normalization": self.row_normalization,
+            "n_trials": self.n_trials,
+            "n_startup_trials": self.n_startup_trials,
+            "max_kl": self.max_kl,
+            "trial": self.trial,
+            "refusal_markers": list(self.refusal_markers),
+        }
+
+
+@dataclass
 class JoltConfig:
     """Full run configuration."""
 
@@ -367,6 +437,7 @@ class JoltConfig:
     eval: EvalConfig = field(default_factory=EvalConfig)
     sft: SftConfig = field(default_factory=SftConfig)
     lora: LoraConfig = field(default_factory=LoraConfig)
+    abliteration: AbliterationConfig = field(default_factory=AbliterationConfig)
 
     @property
     def run_dir(self) -> Path:
@@ -385,6 +456,7 @@ class JoltConfig:
             "eval": self.eval.to_dict(),
             "sft": self.sft.to_dict(),
             "lora": self.lora.to_dict(),
+            "abliteration": self.abliteration.to_dict(),
         }
 
 
@@ -397,6 +469,7 @@ _SECTIONS: dict[str, type] = {
     "eval": EvalConfig,
     "sft": SftConfig,
     "lora": LoraConfig,
+    "abliteration": AbliterationConfig,
 }
 
 
@@ -469,13 +542,15 @@ def _coerce(cls: type, raw: dict[str, Any], name: str) -> Any:
 
 
 def _resolve_config_paths(cfg: JoltConfig) -> None:
-    """Resolves relative `model.path`, `run.out_dir` and `task.dataset` from the repository root."""
+    """Resolves the relative paths of the config (model, run, datasets, corpora) from the repository root."""
     cfg.model.path = _resolve_path(cfg.model.path, REPO_ROOT)
     cfg.run.out_dir = _resolve_path(cfg.run.out_dir, REPO_ROOT)
     cfg.task.dataset = _resolve_path(cfg.task.dataset, REPO_ROOT)
     cfg.sft.corpus = [_resolve_path(path, REPO_ROOT) for path in cfg.sft.corpus]
     if Path(cfg.sft.replay) != UNSET_PATH:
         cfg.sft.replay = _resolve_path(cfg.sft.replay, REPO_ROOT)
+    if Path(cfg.abliteration.prompts) != UNSET_PATH:
+        cfg.abliteration.prompts = _resolve_path(cfg.abliteration.prompts, REPO_ROOT)
 
 
 def validate_cuda_alloc_conf(value: str) -> None:
@@ -627,6 +702,8 @@ def validate_config(cfg: JoltConfig) -> JoltConfig:
 
     if cfg.method == SFT_METHOD:
         _validate_sft(cfg.sft)
+    if cfg.method == ABLITERATE_METHOD:
+        _validate_abliteration(cfg)
     _validate_lora(cfg)
     return cfg
 
@@ -673,6 +750,39 @@ def _validate_sft(sft: SftConfig) -> None:
         raise ConfigError(f"sft.replay_ratio must be in [0, 1), got {sft.replay_ratio}")
     if sft.replay_ratio > 0 and Path(sft.replay) == UNSET_PATH:
         raise ConfigError("sft.replay_ratio > 0 requires sft.replay — the replay corpus directory")
+
+
+def _validate_abliteration(cfg: JoltConfig) -> None:
+    """Invariants of the `abliteration` section (checked only when `method: abliterate`)."""
+    section = cfg.abliteration
+    if Path(section.prompts) == UNSET_PATH:
+        raise ConfigError(
+            "method=abliterate requires abliteration.prompts — an abliteration-prompts directory "
+            "(docs/10-abliteration.md)"
+        )
+    for name in ("direction_split", "eval_split"):
+        if getattr(section, name) not in SPLITS:
+            raise ConfigError(
+                f"abliteration.{name}={getattr(section, name)!r} is not allowed; allowed values: {list(SPLITS)}"
+            )
+    for name in ("eval_limit", "max_new_tokens", "batch_size", "n_trials"):
+        if getattr(section, name) < 1:
+            raise ConfigError(f"abliteration.{name} must be ≥ 1, got {getattr(section, name)}")
+    if section.n_startup_trials < 0:
+        raise ConfigError(f"abliteration.n_startup_trials must be ≥ 0, got {section.n_startup_trials}")
+    if section.row_normalization not in ROW_NORMALIZATIONS:
+        raise ConfigError(
+            f"abliteration.row_normalization={section.row_normalization!r} is not allowed; "
+            f"allowed values: {list(ROW_NORMALIZATIONS)}"
+        )
+    if not math.isfinite(section.max_kl) or section.max_kl <= 0:
+        raise ConfigError(f"abliteration.max_kl must be > 0, got {section.max_kl}")
+    if section.trial < -1:
+        raise ConfigError(f"abliteration.trial must be ≥ 0 or −1 (chosen by max_kl), got {section.trial}")
+    if any(not marker.strip() for marker in section.refusal_markers):
+        raise ConfigError("abliteration.refusal_markers must not contain empty strings")
+    if cfg.lora.enabled:
+        raise ConfigError("method=abliterate edits the full weights: lora.enabled must be false")
 
 
 def resolve_eval_batch_size(cfg: JoltConfig) -> JoltConfig:
@@ -804,6 +914,7 @@ def clone_config(cfg: JoltConfig) -> JoltConfig:
             **cfg.sft.to_dict() | {"corpus": [Path(path) for path in cfg.sft.corpus], "replay": Path(cfg.sft.replay)}
         ),
         lora=LoraConfig(**cfg.lora.to_dict()),
+        abliteration=AbliterationConfig(**cfg.abliteration.to_dict() | {"prompts": Path(cfg.abliteration.prompts)}),
     )
 
 
@@ -825,6 +936,7 @@ def _duration(cfg: JoltConfig) -> str:
 
 
 __all__ = [
+    "ABLITERATE_METHOD",
     "DISTILL_METHODS",
     "DTYPES",
     "ENGINES",
@@ -836,12 +948,14 @@ __all__ = [
     "PRIVILEGED_TYPES",
     "QUANTIZATIONS",
     "REPO_ROOT",
+    "ROW_NORMALIZATIONS",
     "SCHEDULES",
     "SPLITS",
     "SFT_METHOD",
     "STUDENT_REWARD_METHODS",
     "TEACHER_METHODS",
     "UNSET_PATH",
+    "AbliterationConfig",
     "ConfigError",
     "EvalConfig",
     "JoltConfig",

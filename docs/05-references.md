@@ -90,3 +90,11 @@ The official code is promised, but had not been published at the time this docum
 - `Qwen/Qwen3-8B` — LCBv6
 - `Qwen/Qwen3-4B-Instruct-2507` — AppWorld
 - `Qwen/Qwen3-30B-A3B-Instruct-2507` — Terminal-Bench
+
+## 5.8 Abliteration in trener
+
+| Work | What is taken |
+|---|---|
+| Arditi et al., "Refusal in Language Models Is Mediated by a Single Direction" (2024) — <https://arxiv.org/abs/2406.11717> | the refusal direction as the difference of the mean activations on refused and answered prompts, its ablation from the weights that write into the residual stream ([10-abliteration.md](10-abliteration.md)) |
+| Jim Lai, "Projected abliteration" (2025) — <https://huggingface.co/blog/grimjim/projected-abliteration> | projecting the mean activation of the answered prompts out of the direction (`orthogonalize_direction`) |
+| Jim Lai, "Norm-preserving biprojected abliteration" (2025) — <https://huggingface.co/blog/grimjim/norm-preserving-biprojected-abliteration> | keeping the row norms of the edited weights (`row_normalization: full`) |
