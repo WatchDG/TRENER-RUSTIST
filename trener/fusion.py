@@ -3,7 +3,8 @@
 In the profile of the decode step and of the LFM3 optimization pass, a noticeable share of time goes to
 chains of small element-wise kernels: RMSNorm (cast to fp32, square, mean, `rsqrt`, multiplications — about
 7 kernels per call, 119 calls per decode step), RoPE in fp32 (`apply_rotary_pos_emb`) and
-`silu(w1·x) * w3·x` in the MLP. `torch.compile` fuses each chain into one or two Triton kernels. Only these
+`silu(w1·x) * w3·x` in the MLP, and under QLoRA the NF4 dequantization of every linear layer
+(`trener.quant.dequantize_nf4`). `torch.compile` fuses each chain into one or two Triton kernels. Only these
 functions are compiled, not the whole model: their code is simple for Dynamo, while the cache, masks,
 packing and the decode CUDA graph stay as they are. The formulas are the same; the differences are in
 bf16 rounding.
@@ -21,6 +22,8 @@ from collections.abc import Callable
 from typing import Any
 
 import torch
+
+from . import quant
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +65,7 @@ def fuse_model(model: torch.nn.Module) -> list[str]:
 
     RMSNorm and MLP are replaced on the instances of this model's modules; RoPE is the function of the
     module with the model's code (`apply_rotary_pos_emb`), i.e. for all models of this class in the process.
+    The NF4 dequantization (QLoRA layers) is likewise replaced in `trener.quant` for the whole process.
     A repeated call changes nothing; `unfuse_model` restores the original functions.
     """
     torch._dynamo.config.recompile_limit = max(torch._dynamo.config.recompile_limit, RECOMPILE_LIMIT)
@@ -84,6 +88,12 @@ def fuse_model(model: torch.nn.Module) -> list[str]:
             namespace.apply_rotary_pos_emb = _cuda_only(rope)
             patched["rope"] = patched.get("rope", 0) + 1
 
+    n_nf4 = sum(isinstance(module, quant.NF4Linear) for module in model.modules())
+    if n_nf4:
+        if not hasattr(quant.dequantize_nf4, "jolt_original"):
+            quant.dequantize_nf4 = _cuda_only(quant.dequantize_nf4)
+        patched["nf4"] = n_nf4
+
     names = [f"{kind}×{count}" for kind, count in patched.items()]
     logger.info("fused kernels (torch.compile): %s", ", ".join(names) or "nothing to replace")
     return names
@@ -99,6 +109,8 @@ def unfuse_model(model: torch.nn.Module) -> None:
         rope = getattr(namespace, "apply_rotary_pos_emb", None)
         if rope is not None and hasattr(rope, "jolt_original"):
             namespace.apply_rotary_pos_emb = rope.jolt_original
+    if hasattr(quant.dequantize_nf4, "jolt_original"):
+        quant.dequantize_nf4 = quant.dequantize_nf4.jolt_original
 
 
 __all__ = ["RECOMPILE_LIMIT", "fuse_model", "unfuse_model"]

@@ -10,6 +10,11 @@ place), to `trener.fusion` (the compiled MLP includes the adapter) and to packin
 The base is frozen with `requires_grad=False`: the fp32 master and the optimizer (`trener.modeling`,
 `trener.optim`) cover only the adapter parameters, with no separate code path.
 
+QLoRA (`lora.quantize: nf4`): every linear layer except `lm_head` becomes `trener.quant.NF4Linear` (the frozen
+weight in 4-bit NF4 on the device, its original in RAM), the targets — `QLoraLinear` (the same plus an adapter).
+The state_dict keys stay the same, and the state_dict `weight` of a quantized layer is the original: checkpoints,
+merging and loading do not distinguish the two kinds.
+
 On disk (`docs/09-lora.md`) the adapter is in the PEFT format — `adapter_model.safetensors` (fp32, keys
 `base_model.model.<module>.lora_A.weight`) and `adapter_config.json` — plus `lora_base.json`: which weights the
 adapter was trained on top of (the model fingerprint and the checkpoint the run started from).
@@ -28,6 +33,8 @@ import torch.nn.functional as F
 from safetensors.torch import load_file, save_file
 from torch import nn
 
+from .quant import NF4Linear, base_weight, set_base_weight
+
 if TYPE_CHECKING:  # pragma: no cover - for typing only
     from .config import LoraConfig
     from .modeling import Policy
@@ -42,7 +49,40 @@ LORA_BASE = "lora_base.json"
 PEFT_PREFIX = "base_model.model."
 
 
-class LoraLinear(nn.Linear):
+class LoraLayer(nn.Module):
+    """Adapter of a linear layer: `lora_A`, `lora_B` and the scale `alpha/r`; the subclass computes the base output."""
+
+    lora_A: nn.Linear
+    lora_B: nn.Linear
+
+    def _init_adapter(
+        self,
+        in_features: int,
+        out_features: int,
+        *,
+        r: int,
+        alpha: float,
+        dropout: float,
+        device: torch.device | str,
+        dtype: torch.dtype,
+    ) -> None:
+        self.lora_A = nn.Linear(in_features, r, bias=False, device=device, dtype=dtype)  # kaiming-uniform, as in PEFT
+        self.lora_B = nn.Linear(r, out_features, bias=False, device=device, dtype=dtype)
+        nn.init.zeros_(self.lora_B.weight)
+        self.r = int(r)
+        self.alpha = float(alpha)
+        self.scale = float(alpha) / int(r)
+        self.dropout = float(dropout)
+
+    def _adapter(self, x: torch.Tensor) -> torch.Tensor:
+        adapter_input = F.dropout(x, self.dropout, self.training) if self.dropout else x
+        return self.lora_B(self.lora_A(adapter_input)) * self.scale
+
+    def _adapter_repr(self) -> str:
+        return f"r={self.r}, alpha={self.alpha:g}, dropout={self.dropout:g}"
+
+
+class LoraLinear(LoraLayer, nn.Linear):
     """`nn.Linear` with an adapter: the same `weight`/`bias` objects plus `lora_A`, `lora_B` and the scale `alpha/r`."""
 
     def __init__(self, base: nn.Linear, *, r: int, alpha: float, dropout: float = 0.0) -> None:
@@ -51,21 +91,64 @@ class LoraLinear(nn.Linear):
         self.out_features = base.out_features
         self.weight = base.weight
         self.register_parameter("bias", base.bias)
-        factory = {"device": base.weight.device, "dtype": base.weight.dtype}
-        self.lora_A = nn.Linear(base.in_features, r, bias=False, **factory)  # kaiming-uniform, as in PEFT
-        self.lora_B = nn.Linear(r, base.out_features, bias=False, **factory)
-        nn.init.zeros_(self.lora_B.weight)
-        self.r = int(r)
-        self.alpha = float(alpha)
-        self.scale = float(alpha) / int(r)
-        self.dropout = float(dropout)
+        self._init_adapter(
+            base.in_features,
+            base.out_features,
+            r=r,
+            alpha=alpha,
+            dropout=dropout,
+            device=base.weight.device,
+            dtype=base.weight.dtype,
+        )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        adapter_input = F.dropout(x, self.dropout, self.training) if self.dropout else x
-        return F.linear(x, self.weight, self.bias) + self.lora_B(self.lora_A(adapter_input)) * self.scale
+        return F.linear(x, self.weight, self.bias) + self._adapter(x)
 
     def extra_repr(self) -> str:
-        return f"{super().extra_repr()}, r={self.r}, alpha={self.alpha:g}, dropout={self.dropout:g}"
+        return f"{nn.Linear.extra_repr(self)}, {self._adapter_repr()}"
+
+
+class QLoraLinear(LoraLayer, NF4Linear):
+    """QLoRA layer: the frozen weight in NF4 (`trener.quant.NF4Linear`) plus an adapter in the original dtype."""
+
+    def __init__(
+        self,
+        base: nn.Linear,
+        *,
+        r: int,
+        alpha: float,
+        dropout: float = 0.0,
+        block_size: int = 64,
+        double_quant: bool = True,
+        device: torch.device | str | None = None,
+    ) -> None:
+        device = device if device is not None else base.weight.device
+        NF4Linear.__init__(
+            self,
+            base.in_features,
+            base.out_features,
+            bias=base.bias,
+            block_size=block_size,
+            double_quant=double_quant,
+            device=device,
+            dtype=base.weight.dtype,
+        )
+        self.set_weight(base.weight.detach())
+        self._init_adapter(
+            base.in_features,
+            base.out_features,
+            r=r,
+            alpha=alpha,
+            dropout=dropout,
+            device=device,
+            dtype=base.weight.dtype,
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return NF4Linear.forward(self, x) + self._adapter(x)
+
+    def extra_repr(self) -> str:
+        return f"{NF4Linear.extra_repr(self)}, {self._adapter_repr()}"
 
 
 @dataclass
@@ -77,11 +160,23 @@ class LoraState:
     dropout: float
     #: Short names of the adapted layers (`q_proj`, `w1`, …), sorted.
     targets: list[str]
-    modules: dict[str, LoraLinear] = field(default_factory=dict, repr=False)
+    modules: dict[str, LoraLayer] = field(default_factory=dict, repr=False)
+    #: Storage of the frozen base: `none` (bf16) or `nf4` (QLoRA) with its block size and double quantization.
+    quantize: str = "none"
+    quant_block_size: int = 64
+    double_quant: bool = True
+    #: QLoRA: every quantized layer by path (the targets included).
+    quantized: dict[str, NF4Linear] = field(default_factory=dict, repr=False)
 
     @property
     def scale(self) -> float:
         return self.alpha / self.r
+
+    def quantization(self) -> dict[str, Any] | None:
+        """Storage of the frozen base as recorded in `lora_base.json` (`base_quantization`); `None` — bf16."""
+        if self.quantize == "none":
+            return None
+        return {"type": self.quantize, "block_size": self.quant_block_size, "double_quant": self.double_quant}
 
     def param_names(self) -> set[str]:
         """state_dict names of the adapter parameters (`<module>.lora_A.weight`, `<module>.lora_B.weight`)."""
@@ -90,21 +185,34 @@ class LoraState:
     def n_parameters(self) -> int:
         return sum(m.lora_A.weight.numel() + m.lora_B.weight.numel() for m in self.modules.values())
 
+    def n_quantized_parameters(self) -> int:
+        """Weights stored in NF4 (they are buffers, not parameters)."""
+        return sum(m.in_features * m.out_features for m in self.quantized.values())
+
     def info(self) -> dict[str, Any]:
-        return {"r": self.r, "alpha": self.alpha, "dropout": self.dropout, "targets": self.targets}
+        return {
+            "r": self.r,
+            "alpha": self.alpha,
+            "dropout": self.dropout,
+            "targets": self.targets,
+            "quantization": self.quantization(),
+        }
 
 
 def _short(name: str) -> str:
     return name.rsplit(".", 1)[-1]
 
 
-def apply_lora(model: nn.Module, cfg: LoraConfig) -> LoraState:
+def apply_lora(model: nn.Module, cfg: LoraConfig, *, device: torch.device | str | None = None) -> LoraState:
     """Freezes the model and replaces the target `nn.Linear` layers with `LoraLinear`.
 
     `cfg.targets` — short layer names; empty — all linear layers except the output embeddings (`lm_head`).
     A name that matches no layer is an error.
+
+    `cfg.quantize == "nf4"` (QLoRA): every linear layer except `lm_head` is quantized on `device` (by default —
+    where its weight is): the targets become `QLoraLinear`, the rest `NF4Linear`.
     """
-    if any(isinstance(module, LoraLinear) for module in model.modules()):
+    if any(isinstance(module, (LoraLayer, NF4Linear)) for module in model.modules()):
         raise ValueError("LoRA is already applied to this model")
     for param in model.parameters():
         param.requires_grad_(False)
@@ -121,23 +229,41 @@ def apply_lora(model: nn.Module, cfg: LoraConfig) -> LoraState:
     unknown = sorted(wanted - set(available))
     if unknown:
         raise ValueError(f"lora.targets: no nn.Linear layers named {unknown} in the model; available: {available}")
-    selected = [(name, module) for name, module in candidates if not wanted or _short(name) in wanted]
+    selected = {name for name, _ in candidates if not wanted or _short(name) in wanted}
     if not selected:
         raise ValueError("lora: the model has no linear layers to adapt")
 
-    modules: dict[str, LoraLinear] = {}
-    for name, module in selected:
+    quantize = cfg.quantize != "none"
+    nf4 = {"block_size": int(cfg.quant_block_size), "double_quant": bool(cfg.double_quant), "device": device}
+    modules: dict[str, LoraLayer] = {}
+    quantized: dict[str, NF4Linear] = {}
+    for name, module in candidates:
+        if name not in selected and not quantize:
+            continue
         parent_name, _, child = name.rpartition(".")
         parent = model.get_submodule(parent_name) if parent_name else model
-        adapted = LoraLinear(module, r=cfg.r, alpha=cfg.alpha, dropout=cfg.dropout)
-        setattr(parent, child, adapted)
-        modules[name] = adapted
+        replacement: nn.Module
+        if not quantize:
+            replacement = LoraLinear(module, r=cfg.r, alpha=cfg.alpha, dropout=cfg.dropout)
+        elif name in selected:
+            replacement = QLoraLinear(module, r=cfg.r, alpha=cfg.alpha, dropout=cfg.dropout, **nf4)
+        else:
+            replacement = NF4Linear.from_linear(module, **nf4)
+        setattr(parent, child, replacement)
+        if isinstance(replacement, LoraLayer):
+            modules[name] = replacement
+        if isinstance(replacement, NF4Linear):
+            quantized[name] = replacement
     return LoraState(
         r=int(cfg.r),
         alpha=float(cfg.alpha),
         dropout=float(cfg.dropout),
         targets=sorted({_short(name) for name in modules}),
         modules=modules,
+        quantize=str(cfg.quantize),
+        quant_block_size=int(cfg.quant_block_size),
+        double_quant=bool(cfg.double_quant),
+        quantized=quantized,
     )
 
 
@@ -184,7 +310,8 @@ def merged_model_state(
             if leaf == "weight" and module in state.modules:
                 a = adapter[peft_key(f"{module}.lora_A.weight")]
                 b = adapter[peft_key(f"{module}.lora_B.weight")]
-                tensor = merge_delta(tensor, a, b, state.scale)
+                # QLoRA: the original weight is on the CPU, the merge runs on the device
+                tensor = merge_delta(tensor.to(policy.device), a, b, state.scale)
             merged[name] = tensor.detach().to(torch.bfloat16).to("cpu")  # cast on the device: half the transfer
     return merged
 
@@ -275,7 +402,8 @@ def merge_adapter(policy: Policy, tensors: dict[str, torch.Tensor], config: dict
     """Merges a saved adapter into the policy's base weights (`W ← W + scale·B·A`).
 
     Where a base weight has an fp32 master (full training after LoRA), the master gets the fp32 result.
-    The policy's own adapters (if any) are not touched.
+    The policy's own adapters (if any) are not touched; a quantized base (QLoRA) merges into its original
+    and is quantized again.
     """
     scale = _adapter_scale(config)
     index = {name: i for i, name in enumerate(policy.master_names)}
@@ -285,9 +413,8 @@ def merge_adapter(policy: Policy, tensors: dict[str, torch.Tensor], config: dict
                 module = policy.model.get_submodule(module_name)
             except AttributeError as exc:
                 raise ValueError(f"adapter layer {module_name!r} is not in the model") from exc
-            weight = module.weight
             merged = merge_delta(
-                weight.data,
+                base_weight(module).to(policy.device),
                 tensors[peft_key(f"{module_name}.lora_A.weight")],
                 tensors[peft_key(f"{module_name}.lora_B.weight")],
                 scale,
@@ -296,7 +423,7 @@ def merge_adapter(policy: Policy, tensors: dict[str, torch.Tensor], config: dict
             if name in index:
                 policy.set_master_fp32(index[name], merged)
             else:
-                weight.data.copy_(merged.to(weight.dtype))
+                set_base_weight(module, merged)
 
 
 __all__ = [
@@ -304,8 +431,10 @@ __all__ = [
     "ADAPTER_WEIGHTS",
     "LORA_BASE",
     "PEFT_PREFIX",
+    "LoraLayer",
     "LoraLinear",
     "LoraState",
+    "QLoraLinear",
     "adapter_config",
     "adapter_tensors",
     "apply_lora",

@@ -280,7 +280,9 @@ def build_policy(
     `with_master=False` — without fp32 master copies (evaluation without training).
     `master_storage="split"` — master as the bf16 model weights plus `int16` low halves (no persistent fp32
     tensors); `master_offload` — residuals in pinned RAM. `lora` — freeze the model and attach adapters
-    (`trener.lora.apply_lora`) before the master is built: the master covers only the adapters.
+    (`trener.lora.apply_lora`) before the master is built: the master covers only the adapters. With
+    `lora.quantize` (QLoRA) the linear layers are quantized on `device` before the model moves there, so their
+    bf16 weights never occupy it.
     """
     if master_storage not in ("fp32", "split"):
         raise ValueError(f"master_storage must be 'fp32' or 'split', got {master_storage!r}")
@@ -289,9 +291,12 @@ def build_policy(
             device = next(model.parameters()).device
         except StopIteration:  # pragma: no cover - model without parameters
             device = torch.device("cpu")
+    quantized = lora is not None and lora.quantize != "none"
+    lora_state = apply_lora(model, lora, device=device) if quantized else None
     model.to(device)
     model.config.use_cache = True
-    lora_state = apply_lora(model, lora) if lora is not None else None
+    if lora is not None and not quantized:
+        lora_state = apply_lora(model, lora)
     use_jolt_attention(model)  # `sdpa` → `jolt_sdpa`: same formula, faster packing and decoding
 
     split = with_master and master_storage == "split"
@@ -320,7 +325,9 @@ def build_policy(
         "dtype": dtype,
         "model_path": str(model_path) if model_path is not None else None,
         "model_fingerprint": fingerprint,
-        "n_parameters": sum(p.numel() for p in {id(p): p for p in model.parameters()}.values()),
+        # NF4 weights (QLoRA) are buffers: counted separately so the model size does not change
+        "n_parameters": sum(p.numel() for p in {id(p): p for p in model.parameters()}.values())
+        + (lora_state.n_quantized_parameters() if lora_state is not None else 0),
         "n_trainable_parameters": sum(
             p.numel() for p in {id(p): p for p in model.parameters() if p.requires_grad}.values()
         ),

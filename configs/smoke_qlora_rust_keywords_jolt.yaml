@@ -1,0 +1,57 @@
+# Smoke preset with QLoRA (docs/09-lora.md §7): smoke_lora_rust_keywords_jolt.yaml with the frozen base stored in
+# 4-bit NF4 (double quantization) on the GPU; rank-16 adapters on all linear layers train in bf16 on top of it.
+# The bf16 original of the base stays in RAM: the final checkpoint merges the adapter into it.
+run:
+  name: smoke_qlora_rust_keywords_jolt
+  seed: 0
+  out_dir: runs
+  checkpoint_every: 3
+  release_cache: true      # return allocator cache at phase boundaries: VRAM reserve 20.3 → 17.5 GB (+1% step time)
+method: jolt
+model:
+  path: models/LFM3-1.7B
+  dtype: bfloat16
+  trust_remote_code: true
+  attn_implementation: sdpa
+  gradient_checkpointing: true
+  compile_kernels: true
+task:
+  dataset: datasets/rust/rust-keywords-0001
+  privileged: reference_answer
+rollout:
+  group_size: 2
+  batch_size: 2
+  temperature: 1.0
+  top_p: 1.0
+  top_k: 0
+  repetition_penalty: 1.0
+  engine: static
+  micro_batch_tokens: 4096
+  max_new_tokens: 128
+  micro_batch_size: 2
+  generation_batch_size: 64
+optim:
+  lr: 1.0e-5
+  beta_teacher_kl: 0.03
+  beta_student_distill: 0.1
+  optimizer: adafactor
+  master_weights: true
+  max_grad_norm: 1.0
+  steps: 3
+  schedule: constant
+  warmup_steps: 1
+eval:
+  every: 3
+  split: test
+  limit: 8
+  max_new_tokens: 128
+  batch_mode: auto  # eval.batch_size = min(test size, eval.limit, 128), set when the config is loaded
+lora:
+  enabled: true
+  r: 16
+  alpha: 32.0
+  dropout: 0.0
+  targets: []        # all linear layers except lm_head
+  quantize: nf4      # QLoRA: every linear layer except lm_head in NF4
+  quant_block_size: 64
+  double_quant: true

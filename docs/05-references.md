@@ -76,7 +76,14 @@ The official code is promised, but had not been published at the time this docum
 | The Art of Scaling RL Compute for LLMs (ScaleRL) | <https://arxiv.org/abs/2510.13786> |
 | TMax (repository and evaluation defaults, commit 6d3d606) | <https://github.com/hamishivi/tmax> |
 
-## 5.6 Models used in the article
+## 5.6 Parameter-efficient training in trener
+
+| Work | What is taken |
+|---|---|
+| Hu et al., "LoRA: Low-Rank Adaptation of Large Language Models" (2021) — <https://arxiv.org/abs/2106.09685> | low-rank adapters on a frozen base, `B = 0` at the start, the scale `alpha / r` ([09-lora.md](09-lora.md)) |
+| Dettmers et al., "QLoRA: Efficient Finetuning of Quantized LLMs" (2023) — <https://arxiv.org/abs/2305.14314> | the 4-bit NormalFloat (NF4) levels, blockwise absmax and double quantization of the frozen base ([09-lora.md §7](09-lora.md)) |
+
+## 5.7 Models used in the article
 
 - `deepseek-ai/DeepSeek-V2-Lite`
 - `Qwen/Qwen3-0.6B` — MATH

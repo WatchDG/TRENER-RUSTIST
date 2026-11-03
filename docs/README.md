@@ -15,7 +15,7 @@ Documentation for the post-training pipeline implementing **JOLT** and **JOLT+**
 | [06-data.md](06-data.md) | Training data: task set catalog, `question`/`answer`/`reason`/`answer_type` records, answer checking, teacher and student prompts, manifest, `data` commands |
 | [07-usage.md](07-usage.md) | Running the pipeline: requirements and environment, presets, training and evaluation, artifact catalog and metrics, recovery from a checkpoint, known limitations |
 | [08-sft.md](08-sft.md) | The `sft` stage before JOLT: the `jolt-corpus` documentation corpus, builder from rustdoc JSON, repetition, configuration, coverage and NLL |
-| [09-lora.md](09-lora.md) | Optional LoRA: frozen base and low-rank adapters for any method, checkpoint format, fine-tuning and continuing an adapter (`--init-from`, `--resume`, `sequence`), PEFT compatibility |
+| [09-lora.md](09-lora.md) | Optional LoRA and QLoRA: frozen base (QLoRA — in 4-bit NF4) and low-rank adapters for any method, checkpoint format, fine-tuning and continuing an adapter (`--init-from`, `--resume`, `sequence`), PEFT compatibility |
 
 ## Key idea in one paragraph
 

@@ -87,7 +87,7 @@ Presets, evaluation, resume and the run directory layout: [docs/07-usage.md](doc
 | [docs/06-data.md](docs/06-data.md) | Training data format: dataset catalog, fields `question`, `answer`, `reason`, `answer_type`, manifest and `data` commands |
 | [docs/07-usage.md](docs/07-usage.md) | Running the pipeline: environment, presets, training, artifacts, resume, limitations |
 | [docs/08-sft.md](docs/08-sft.md) | The `sft` stage before JOLT: training on a pre-built documentation corpus (rustdoc JSON), coverage and NLL |
-| [docs/09-lora.md](docs/09-lora.md) | Optional LoRA: frozen base and low-rank adapters for any method, fine-tuning and continuing an adapter |
+| [docs/09-lora.md](docs/09-lora.md) | Optional LoRA and QLoRA: frozen (optionally 4-bit NF4) base and low-rank adapters for any method, fine-tuning and continuing an adapter |
 
 ## Supported models
 

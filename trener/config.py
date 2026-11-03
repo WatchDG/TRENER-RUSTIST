@@ -48,6 +48,9 @@ PACKING_PROMPT_MARGIN = 256
 #: fp32 master storage: `fp32` — separate tensors, `split` — bf16 model weights + `int16` lower halves.
 MASTER_STORAGES = ("fp32", "split")
 
+#: Quantization of the frozen base under LoRA: `none` — bf16, `nf4` — 4-bit NormalFloat (QLoRA, `trener/quant.py`).
+QUANTIZATIONS = ("none", "nf4")
+
 #: `eval.batch_size` modes: `manual` — value from the config, `auto` — from the test size at config load.
 EVAL_BATCH_MODES = ("auto", "manual")
 
@@ -286,6 +289,13 @@ class LoraConfig:
     #: `--init-from` of a LoRA checkpoint: merge its adapter into the base and train a new one
     #: (by default the run continues training the same adapter).
     merge_init: bool = False
+    #: Storage of the frozen base (`QUANTIZATIONS`): `nf4` — QLoRA, every linear layer except `lm_head` is kept
+    #: in 4-bit NF4 on the GPU (its bf16 original stays in RAM for checkpoints).
+    quantize: str = "none"
+    #: NF4: weights per block with one absmax scale.
+    quant_block_size: int = 64
+    #: NF4: double quantization — the absmax scales in int8 with an fp32 scale per 256 blocks.
+    double_quant: bool = True
 
     @property
     def scale(self) -> float:
@@ -299,6 +309,9 @@ class LoraConfig:
             "dropout": self.dropout,
             "targets": list(self.targets),
             "merge_init": self.merge_init,
+            "quantize": self.quantize,
+            "quant_block_size": self.quant_block_size,
+            "double_quant": self.double_quant,
         }
 
 
@@ -621,9 +634,13 @@ def validate_config(cfg: JoltConfig) -> JoltConfig:
 def _validate_lora(cfg: JoltConfig) -> None:
     """Invariants of the `lora` section (target names are checked against the model in `trener.lora.apply_lora`)."""
     lora = cfg.lora
+    if lora.quantize not in QUANTIZATIONS:
+        raise ConfigError(f"lora.quantize={lora.quantize!r} is not allowed; allowed values: {list(QUANTIZATIONS)}")
     if not lora.enabled:
         if lora.merge_init:
             raise ConfigError("lora.merge_init requires lora.enabled: true")
+        if lora.quantize != "none":
+            raise ConfigError(f"lora.quantize: {lora.quantize} requires lora.enabled: true")
         return
     if lora.r < 1:
         raise ConfigError(f"lora.r must be ≥ 1, got {lora.r}")
@@ -638,6 +655,8 @@ def _validate_lora(cfg: JoltConfig) -> None:
         )
     if len(set(lora.targets)) != len(lora.targets):
         raise ConfigError(f"lora.targets contains duplicates: {lora.targets}")
+    if lora.quant_block_size < 2 or lora.quant_block_size % 2:
+        raise ConfigError(f"lora.quant_block_size must be an even number ≥ 2, got {lora.quant_block_size}")
 
 
 def _validate_sft(sft: SftConfig) -> None:
@@ -796,6 +815,7 @@ def describe(cfg: JoltConfig) -> str:
         f"beta_T={cfg.optim.beta_teacher_kl} beta_S={cfg.optim.beta_student_distill} "
         f"{_duration(cfg)} model={cfg.model.path}"
         + (f" lora=r{cfg.lora.r}" if cfg.lora.enabled else "")
+        + (f" {cfg.lora.quantize}" if cfg.lora.enabled and cfg.lora.quantize != "none" else "")
     )
 
 
@@ -814,6 +834,7 @@ __all__ = [
     "METHODS",
     "OPTIMIZERS",
     "PRIVILEGED_TYPES",
+    "QUANTIZATIONS",
     "REPO_ROOT",
     "SCHEDULES",
     "SPLITS",

@@ -346,6 +346,14 @@ def _load_lora_base(policy: Policy, base: dict[str, Any]) -> None:
         )
 
 
+def _storage(quantization: dict[str, Any] | None) -> str:
+    """Storage of a LoRA base for messages: `unquantized` or `nf4 (block 64, double quant)`."""
+    if not quantization:
+        return "unquantized"
+    double = ", double quant" if quantization.get("double_quant") else ""
+    return f"{quantization.get('type')} (block {quantization.get('block_size')}{double})"
+
+
 class Trainer:
     """Runs a JOLT step and makes one update of the shared parameters."""
 
@@ -367,11 +375,12 @@ class Trainer:
         self._update_stats: dict[str, Any] = {}
         self._clock = _PhaseClock(False)
         #: LoRA: the weights the adapter trains on top of (`lora_base.json` of the checkpoints): `model.path`,
-        #: or the checkpoint the run started from (`init_from`).
+        #: or the checkpoint the run started from (`init_from`), and their storage in this run (QLoRA: NF4).
         self.lora_base: dict[str, Any] = {
             "base_model": str(cfg.model.path),
             "base_fingerprint": policy.model_fingerprint,
             "base_checkpoint": None,
+            "base_quantization": policy.lora.quantization() if policy.lora is not None else None,
         }
 
     # ------------------------------------------------------------------ step
@@ -1125,7 +1134,8 @@ class Trainer:
 
         With LoRA (`docs/09-lora.md`): a LoRA checkpoint continues its adapter on top of the same base
         (with `lora.merge_init` outside resume — the adapter is merged into the base, and a new one starts);
-        a full checkpoint becomes the base of the adapter.
+        a full checkpoint becomes the base of the adapter. `--init-from` may switch the base between bf16 and NF4
+        (QLoRA); `--resume` requires the storage the checkpoint was trained with.
         """
         policy = self.policy
         adapter = is_adapter_checkpoint(checkpoint)
@@ -1136,9 +1146,20 @@ class Trainer:
             self._load_full_weights(checkpoint)
         elif adapter and (resume or not self.cfg.lora.merge_init):
             tensors, config, base = read_adapter(checkpoint)
+            saved, current = base.get("base_quantization"), self.lora_base["base_quantization"]
+            if saved != current:
+                if resume:
+                    raise ValueError(
+                        f"checkpoint {checkpoint} was trained on a {_storage(saved)} base, lora.quantize gives "
+                        f"{_storage(current)}: resume it with lora.quantize: {(saved or {}).get('type', 'none')}"
+                        + (" and the same quant_block_size, double_quant" if saved and current else "")
+                    )
+                logger.info(
+                    "LoRA: the adapter was trained on a %s base, continues on %s", _storage(saved), _storage(current)
+                )
             _load_lora_base(policy, base)
             load_adapter(policy, tensors, config)
-            self.lora_base = {**self.lora_base, **base}
+            self.lora_base = {**self.lora_base, **base, "base_quantization": current}
             source = base.get("base_checkpoint") or "model.path"
             logger.info("LoRA: adapter %s continues on top of %s", checkpoint, source)
         else:

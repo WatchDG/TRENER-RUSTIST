@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-03
+
+### Added
+
+- Optional QLoRA (`lora.quantize: nf4`, `lora.quant_block_size`, `lora.double_quant`; `trener/quant.py`,
+  `docs/09-lora.md` §7): under LoRA every linear layer except `lm_head` keeps its frozen weight in 4-bit NF4 with
+  double quantization on the GPU, while its bf16 original stays in RAM. Own implementation without new dependencies:
+  works with the `static` engine's CUDA graph, `model.compile_kernels` (the dequantization is compiled) and on CPU;
+  backward dequantizes the weight again instead of saving it. Checkpoints keep the LoRA format; `lora_base.json`
+  records `base_quantization`, and the final `model.safetensors` merges the adapter into the bf16 base.
+  `--init-from` works as with LoRA (a LoRA adapter can continue on an NF4 base and back, `lora.merge_init` merges
+  into the bf16 original and quantizes again); `--resume` requires the same base storage. Preset
+  `configs/smoke_qlora_rust_keywords_jolt.yaml`.
+
 ## [0.2.0] - 2026-11-03
 
 ### Added
@@ -71,6 +85,7 @@ First release.
 - Tests that need the LFM3 tokenizer are skipped when `models/LFM3-1.7B` is
   absent instead of failing.
 
-[Unreleased]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/WatchDG/TRENER-RUSTIST/releases/tag/v0.1.0

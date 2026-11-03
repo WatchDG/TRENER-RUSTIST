@@ -435,7 +435,14 @@ class RunArtifacts:
             ("model.path", str(model.get("path", MISSING))),
         ]
         if lora.get("enabled"):
-            lines.append(("lora", f"r={lora.get('r', MISSING)} alpha={lora.get('alpha', MISSING)}"))
+            quantize = lora.get("quantize", "none")
+            lines.append(
+                (
+                    "lora",
+                    f"r={lora.get('r', MISSING)} alpha={lora.get('alpha', MISSING)}"
+                    + (f" {quantize}" if quantize != "none" else ""),
+                )
+            )
         return lines
 
     def latest_eval_accuracy(self) -> float | None:
