@@ -271,7 +271,7 @@ runs/<name>/
   `post_ffn_norm`). Projections are found in LFM3 layers and in Llama-like ones (`self_attn.o_proj`,
   `mlp.down_proj`, no post-norm); other architectures are not supported.
 - KL is measured on the first token of the `good` prompts only (§4.2).
-- `lora.enabled: true` is rejected; `bench` does not measure `abliterate` (time per trial is `trial_s` in
+- `lora.enabled: true` is rejected; `speed` does not measure `abliterate` (time per trial is `trial_s` in
   `metrics.jsonl`).
 
 ## 8. Measured characteristics

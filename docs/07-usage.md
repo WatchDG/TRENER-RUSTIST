@@ -58,7 +58,7 @@ Checking the environment:
 .venv\Scripts\python.exe -c "import trener; print(trener.__version__)"
 ```
 
-Expected: `2.13.0+cu130 13.0 True` and `0.4.1`.
+Expected: `2.13.0+cu130 13.0 True` and `0.5.0`.
 
 Data: the presets read tasks from the dataset directory `datasets/rust/rust-keywords-0001` (field `task.dataset`,
 format — [06-data.md](06-data.md)). Checking the dataset:
@@ -112,6 +112,7 @@ Useful keys:
 | `--init-from runs/<name>/checkpoints/step-<N>` | new run from the checkpoint's weights: step 0, optimizer from scratch (§7.6) |
 | `--set lora.enabled=true` | train LoRA adapters on a frozen base instead of all weights ([09-lora.md](09-lora.md)) |
 | `--set lora.quantize=nf4` | QLoRA: together with `lora.enabled=true`, the frozen base in 4-bit NF4 ([09-lora.md §7](09-lora.md)) |
+| `--bench gsm8k` | measure the model on a benchmark of `bench/` at the start, at the end (and every `bench.every` steps); repeatable, shorthand for `--set bench.names=...` ([11-benchmarks.md](11-benchmarks.md)) |
 | `--set run.profile=true` | additionally write the breakdown of the optimization phase (`forward_backward_time_s`, `optimizer_time_s`) |
 
 The run directory by default is `runs/<run.name>/` (`run.out_dir` in the config).
@@ -133,11 +134,12 @@ steps for JOLT, `plan.steps_per_epoch` for `sft`.
 | `optim.warmup_steps` | `optim.warmup_epochs` | `round`; a warmup shorter than an epoch stays in steps |
 | `run.checkpoint_every` | `run.checkpoint_every_epochs` | `round`, at least 1 |
 | `eval.every` | `eval.every_epochs` | `round`, at least 1 |
+| `bench.every` | `bench.every_epochs` | `round`, at least 1 |
 
 A value in epochs replaces its step twin; both in one YAML section is an error. `--set` of one field of a pair clears
 its twin (`--set optim.steps=7` on a preset with `epochs`). Epochs are resolved to steps after the dataset is loaded:
 the run's `config.yaml` holds the resulting steps, `env.json` (`schedule`) — the epoch size and the resolution.
-With a fractional epoch size an interval is approximate. `bench` and `measure_memory.py` take the length from `--steps`.
+With a fractional epoch size an interval is approximate. `speed` and `measure_memory.py` take the length from `--steps`.
 
 Performance parameters (they do not affect the step's math):
 
@@ -166,12 +168,12 @@ The default values preserve the base behavior (`hf`, no packing and no fusion). 
 (`configuration error`).
 
 Measuring the step speed — without checkpoints and evaluation, the result goes to
-`runs/<run.name>/bench.json` (config, metrics of all steps, medians over steps 2…N and
+`runs/<run.name>/speed.json` (config, metrics of all steps, medians over steps 2…N and
 peak memory; the first step is warm-up and is not included in the medians):
 
 ```powershell
-.venv\Scripts\python.exe -m trener bench --config configs/rust_std/rust_keywords_jolt.yaml --steps 3 --set run.name=bench_a_base
-.venv\Scripts\python.exe -m trener bench --config configs/rust_std/rust_keywords_jolt.yaml --steps 3 --set rollout.engine=static --set run.name=bench_b_static
+.venv\Scripts\python.exe -m trener speed --config configs/rust_std/rust_keywords_jolt.yaml --steps 3 --set run.name=speed_a_base
+.venv\Scripts\python.exe -m trener speed --config configs/rust_std/rust_keywords_jolt.yaml --steps 3 --set rollout.engine=static --set run.name=speed_b_static
 ```
 
 **Before measurements and the production run, free the GPU:** close Wallpaper Engine,
@@ -190,6 +192,14 @@ Checkpoint evaluation and summary recalculation:
 together with the breakdown by task (`per_task`: answer, number of tokens). A nonexistent directory in
 `--checkpoint` means evaluation of the base model.
 
+Model benchmarks (GSM8K and other sets of `bench/`) — a separate measurement with a self-contained report and
+comparison of reports, standalone or during training: [11-benchmarks.md](11-benchmarks.md).
+
+```powershell
+.venv\Scripts\python.exe -m trener bench run --config configs/rust_std/rust_keywords_jolt.yaml --bench gsm8k --checkpoint runs/jolt_run/checkpoints/step-25
+.venv\Scripts\python.exe -m trener bench compare reports/gsm8k runs/jolt_run/bench
+```
+
 ## 7.5 Run Directory and Metrics
 
 ```
@@ -199,10 +209,12 @@ runs/<name>/
   metrics.jsonl          # exactly one JSON line per step
   curves.csv             # flat projection of metrics.jsonl for plots (step rows only)
   eval/step-<N>.json     # results of periodic and final evaluation
+  bench/<benchmark>/step-<N>.json  # with `bench.names`: benchmark reports (+ .md, .completions.jsonl), 11-benchmarks.md
+  bench/summary.md       # comparison of the run's benchmark reports by step
   checkpoints/step-<N>/  # model.safetensors (tied lm_head/embed — one tensor), master.safetensors,
                          # optimizer.pt, trainer_state.pt, config.json
                          # (writing runs in the background into step-<N>.tmp/ and is atomically renamed)
-  bench.json             # only for `python -m trener bench`: step metrics and phase medians
+  speed.json             # only for `python -m trener speed`: step metrics and phase medians
   summary.md             # summary table of the run
 ```
 
@@ -344,7 +356,7 @@ master weights, Adafactor optimizer.
 > two instead of four; the step time, `processed_tokens`, and evaluation time need to be re-measured.
 
 > **Training acceleration (stages A–C).** The code is implemented and
-> verified by tests on small models: profile metrics and `bench`, group
+> verified by tests on small models: profile metrics and `speed`, group
 > operations on master weights, asynchronous checkpoint, the `static` engine, packing.
 > **Measured on LFM3 (RTX 4090, 2026-10-29):** `jolt`, `micro_batch_size=16`,
 > gradient checkpointing enabled (without it the peak is 25–34 GB and the step ×9–×30);
@@ -355,25 +367,25 @@ master weights, Adafactor optimizer.
 > 16.6 s; 8192 — −22%, 16384 — worse than the base (peak 19.5 GB). The difference between packed and unpacked scoring is at the level of
 > bf16 noise. Background GPU load shifts rollout time by ±30%, compare phases rather than the step. The
 > memory profile numbers below are the base ones.
-> **Summary (`bench` 5 steps, presets with `static` and `micro_batch_tokens=4096`):** `jolt` step 16.8 s
+> **Summary (`speed` 5 steps, presets with `static` and `micro_batch_tokens=4096`):** `jolt` step 16.8 s
 > (rollout 8.9, scoring 1.5, update 6.2), `jolt+` 16.8 s, peak 16.6 GB; a production run of 200 steps — about an hour
 > without evaluations (evaluation time with `static` not measured). The numbers below marked "before round 1" and "~160 s" are the history
 > of the base run, not the current speed.
-> **Triton (`triton-windows` 3.7.1, 2026-10-29):** `bench` 5 steps — step 16.5 s (rollout 8.8, scoring 1.3,
+> **Triton (`triton-windows` 3.7.1, 2026-10-29):** `speed` 5 steps — step 16.5 s (rollout 8.8, scoring 1.3,
 > update 6.3), 17.2 ms per decode step, peak 16.6 GB: within noise. Checks at the level of the bf16 noise floor
 > (cross-scoring versus the optimization pass: signed mean 4e-5 at mean|Δ| 7.4e-3). Profile of the decode step
 > (batch 64): convolution — 0.06 ms out of 14 ms of kernel time; the main part — `matmul` 7.5 ms and K/V copies 4 ms: decoding
 > passes a mask, so SDPA in `transformers` goes through `repeat_kv` (K/V are copied ×4 in each of 11 attention
 > layers) instead of `enable_gqa`.
 > **Decode-step attention without `repeat_kv` (`trener.decode.sdpa_gqa_attention`, 2026-10-29):** decode step 17.5 → 9.95 ms
-> (A/B in one process, greedy completions matched 64/64), `bench`: step **12.5 s** (rollout 5.0, scoring 1.3,
+> (A/B in one process, greedy completions matched 64/64), `speed`: step **12.5 s** (rollout 5.0, scoring 1.3,
 > update 6.2), peak 16.6 GB; 200 steps — about 42 minutes without evaluations.
-> **Attention by packed-row documents and fused kernels (`compile_kernels`, 2026-10-29):** `bench` `jolt` —
+> **Attention by packed-row documents and fused kernels (`compile_kernels`, 2026-10-29):** `speed` `jolt` —
 > step **9.3 s** (rollout 3.9, scoring 0.95, update 4.4), 7.65 ms per decode step, peak 16.6 GB; `jolt+` — 9.4 s; the first
 > step of the process is longer by ≈ 40 s (compilation). There is no offset of ℓ between cross-scoring and the optimization pass
 > (+5e-5 ± 1e-4 over 45 thousand tokens). 200 steps — about 31 minutes without evaluations.
 
-> **Memory and economy modes (stages E–G, 2026-10-29):** `bench` `jolt` — step **9.7 s**, peak allocated
+> **Memory and economy modes (stages E–G, 2026-10-29):** `speed` `jolt` — step **9.7 s**, peak allocated
 > **13.4 GB**, reserved **15.5 GB** (was 16.6 / 20.3); `jolt+` — 9.8 s; economy mode (`master_offload`) — 10.0 s and
 > **10.2 GB** peak (§7.9).
 
@@ -508,7 +520,7 @@ not tracked by git.
 
 ## 7.9 VRAM and RAM Memory: Measures of Stages E–G
 
-Measurements — RTX 4090 (PCIe Gen3 x16, pinned 12.5 / 12.3 GB/s H2D / D2H), production `jolt`, `bench` 6 steps (medians of steps
+Measurements — RTX 4090 (PCIe Gen3 x16, pinned 12.5 / 12.3 GB/s H2D / D2H), production `jolt`, `speed` 6 steps (medians of steps
 2…6), 2026-10-29. Initial state: step 9.7 s, peak allocated memory 16.6 GB, reserved — 20.3 GB.
 
 | Mode | Step | Peak allocated | Reserved (median / peak) | Presets |
@@ -544,12 +556,12 @@ What was done and how to enable it:
 - **`run.pinned_checkpoint`** — the checkpoint snapshot into pinned buffers asynchronously (§7.6).
 - **`model.selective_checkpointing`** (selective checkpointing: during recomputation `matmul` and SDPA are not repeated) —
   disabled: on LFM3 with fused kernels `update_time_s` does not decrease (+0.4 s), peak +0.6 GB (not measured without `compile_kernels` —
-  check with `bench`). Numerically the mode equals full checkpointing (tests, including on CUDA with fused kernels).
+  check with `speed`). Numerically the mode equals full checkpointing (tests, including on CUDA with fused kernels).
 - **Compilation cache.** The `torch` caches (Inductor and Triton) already work between processes: a cold start — the first step
   ≈ 32 s, a repeat run with the same cache — ≈ 12 s. There is no separate cache in the pipeline.
 
 The metrics `reserved_memory_gb` (peak of reserved memory of the step) and `optimizer_transfer_s` are in `metrics.jsonl` and
-`bench.json`. Measurement scripts: `scripts/measure_memory.py` (VRAM composition, peaks by phase, PCIe, Adafactor on CPU),
+`speed.json`. Measurement scripts: `scripts/measure_memory.py` (VRAM composition, peaks by phase, PCIe, Adafactor on CPU),
 `scripts/profile_update.py` (forward/backward/optimizer step by rows, `--logit-chunk`),
 `scripts/profile_decode.py` (decode step by kernel categories).
 
@@ -587,7 +599,7 @@ the finished trajectories in the foreign context and performs gradient passes fo
 The trajectories are the same as without overlap. The composition of rows depends only on the order of row completion, not on time.
 The gradients match the sequential path within the bf16 noise field: a different composition of rows, order of accumulation, and scale.
 
-Measurement (`bench` 6 steps, medians of steps 2–6, RTX 4090, 2026-10-31, background GPU load 30–50% — Wallpaper Engine,
+Measurement (`speed` 6 steps, medians of steps 2–6, RTX 4090, 2026-10-31, background GPU load 30–50% — Wallpaper Engine,
 browsers):
 
 | Preset | `overlap` | step | rollout | scoring | update | ms/decode step | `overlap_rows` | `overlap_time_s` | peak / reserved |
@@ -637,7 +649,7 @@ Scoring and update grow linearly with the number of tokens, so the step's gain i
 epochs), the same `lr` (the loss is normalized by `N`). The package code was not changed: decoding 128 rows already works in evaluation
 (`eval.batch_mode: auto`).
 
-Measurement (`bench` 6 steps, medians of steps 2–6, RTX 4090, 2026-10-31; Wallpaper Engine running, GPU idle ≈ 3%):
+Measurement (`speed` 6 steps, medians of steps 2–6, RTX 4090, 2026-10-31; Wallpaper Engine running, GPU idle ≈ 3%):
 
 | Preset | `B×G` | step | rollout | scoring | update | ms/decode step | trajectories/s | completion tokens/s | peak / reserved |
 |---|---|---|---|---|---|---|---|---|---|

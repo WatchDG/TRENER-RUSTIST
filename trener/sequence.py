@@ -25,6 +25,7 @@ from .config import (
     JoltConfig,
     _resolve_path,
     apply_overrides,
+    clone_config,
     load_config,
     resolve_eval_batch_size,
 )
@@ -268,6 +269,16 @@ def _ensure_dist(seq: SequenceConfig, state: dict[str, Any], stage: StageSpec, c
 # ------------------------------------------------------------------- run
 
 
+def _benched_by(prior: JoltConfig, cfg: JoltConfig) -> bool:
+    """The previous stage's final benchmarks cover this stage's `step-0` (same benchmarks and settings)."""
+    if not cfg.bench.names or not cfg.bench.at_start:
+        return False
+    same = ("limit", "seed", "max_new_tokens")
+    return set(cfg.bench.names) <= set(prior.bench.names) and all(
+        getattr(cfg.bench, name) == getattr(prior.bench, name) for name in same
+    )
+
+
 def run_sequence(seq: SequenceConfig) -> int:
     """Runs the stages in order; returns the exit code (0 — all stages completed, 1 — stopped)."""
     from . import cli
@@ -281,6 +292,7 @@ def run_sequence(seq: SequenceConfig) -> int:
     total = len(seq.stages)
     for index, stage in enumerate(seq.stages, start=1):
         cfg = stage.cfg
+        prior = seq.stages[index - 2].cfg if index > 1 else None
         key = str(cfg.run_dir)
         entry = state["stages"].get(key, {})
         done_checkpoint = Path(entry["final_checkpoint"]) if entry.get("final_checkpoint") else None
@@ -322,6 +334,16 @@ def run_sequence(seq: SequenceConfig) -> int:
                 init_from if init_from else "base model",
             )
 
+        if init_from is not None and init_from == previous and prior is not None and _benched_by(prior, cfg):
+            # the same weights were measured at the end of the previous stage
+            cfg = clone_config(cfg)
+            cfg.bench.at_start = False
+            logger.info(
+                "stage %d/%d (%s): bench.at_start skipped — measured at the end of the previous stage",
+                index,
+                total,
+                cfg.run.name,
+            )
         state["stages"][key] = {**entry, "status": RUNNING, "run_dir": key, "final_checkpoint": None}
         _write_state(seq.state_path, state)
         result = cli.run_training(cfg, init_from=init_from, resume=resume)

@@ -17,6 +17,7 @@ Documentation for the post-training pipeline implementing **JOLT** and **JOLT+**
 | [08-sft.md](08-sft.md) | The `sft` stage before JOLT: the `jolt-corpus` documentation corpus, builder from rustdoc JSON, repetition, configuration, coverage and NLL |
 | [09-lora.md](09-lora.md) | Optional LoRA and QLoRA: frozen base (QLoRA — in 4-bit NF4) and low-rank adapters for any method, checkpoint format, fine-tuning and continuing an adapter (`--init-from`, `--resume`, `sequence`), PEFT compatibility |
 | [10-abliteration.md](10-abliteration.md) | `method: abliterate` for experiments: the refusal direction from contrast `bad`/`good` prompts (`abliteration-prompts` format), its ablation from the output projections with the LFM3 sandwich-norm correction, Optuna search on refusal rate and KL, export of the model |
+| [11-benchmarks.md](11-benchmarks.md) | Model benchmarks: the `bench/` sets (GSM8K), the measurement and its metrics, the `bench` section during training, self-contained reports, `bench run` and `bench compare` |
 
 ## Key idea in one paragraph
 

@@ -17,6 +17,9 @@ import yaml
 #: Repository root — relative configuration paths are resolved from it.
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
+#: Benchmark directory (`bench/`, `trener/benchmarks.py`): a benchmark name is a subdirectory of it.
+BENCH_ROOT = REPO_ROOT / "bench"
+
 #: Pipeline methods: `jolt`/`jolt+` — the main methods, `opsd`/`grpo` — rows of the
 #: same table of token weights (see docs/01-jolt.md §1.8).
 METHODS = ("jolt", "jolt+", "opsd", "grpo", "sft", "abliterate")
@@ -73,6 +76,7 @@ EPOCH_TWINS = {
     ("optim", "steps"): "epochs",
     ("optim", "warmup_steps"): "warmup_epochs",
     ("eval", "every"): "every_epochs",
+    ("bench", "every"): "every_epochs",
 }
 
 
@@ -323,6 +327,51 @@ class LoraConfig:
         }
 
 
+@dataclass
+class BenchConfig:
+    """Model benchmarks during training (`trener/benchmarks.py`, `docs/11-benchmarks.md`); off with empty `names`.
+
+    Each benchmark runs on the current weights at the start (step 0), every `every` steps and at the end;
+    the reports go to `<run_dir>/bench/<benchmark>/step-<N>.json`.
+    """
+
+    #: Benchmarks: directory names in `bench/` (`gsm8k`) or paths to `jolt-tasks` directories with a `test` split.
+    names: list[str] = field(default_factory=list)
+    #: Interval in steps (0 — only at the start and at the end).
+    every: int = 0
+    #: Interval in whole epochs (0 — not set; > 0 replaces `every`).
+    every_epochs: int = 0
+    #: Measure the initial weights before the first step (`step-0`); skipped on `--resume`.
+    at_start: bool = True
+    #: Tasks per benchmark (0 — the whole split); the subset is chosen by `seed`.
+    limit: int = 0
+    #: Seed of the task subset — its own, not `run.seed`: reports of different runs cover the same tasks.
+    seed: int = 0
+    #: LFM3 reasons at length: at 1024 tokens 17% of GSM8K completions are cut off (docs/11-benchmarks.md §11.6).
+    max_new_tokens: int = 2048
+    batch_size: int = 64
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "names": list(self.names),
+            "every": self.every,
+            "every_epochs": self.every_epochs,
+            "at_start": self.at_start,
+            "limit": self.limit,
+            "seed": self.seed,
+            "max_new_tokens": self.max_new_tokens,
+            "batch_size": self.batch_size,
+        }
+
+
+def benchmark_path(name: str | Path) -> Path:
+    """Benchmark directory: a plain name is `bench/<name>`, a value with a path separator is a path from the root."""
+    text = str(name).strip()
+    if "/" in text or "\\" in text:
+        return _resolve_path(text, REPO_ROOT)
+    return BENCH_ROOT / text
+
+
 #: Unset path of the `sft` section (`Path("")` and `Path(".")` are equal).
 UNSET_PATH = Path(".")
 
@@ -438,6 +487,7 @@ class JoltConfig:
     sft: SftConfig = field(default_factory=SftConfig)
     lora: LoraConfig = field(default_factory=LoraConfig)
     abliteration: AbliterationConfig = field(default_factory=AbliterationConfig)
+    bench: BenchConfig = field(default_factory=BenchConfig)
 
     @property
     def run_dir(self) -> Path:
@@ -457,6 +507,7 @@ class JoltConfig:
             "sft": self.sft.to_dict(),
             "lora": self.lora.to_dict(),
             "abliteration": self.abliteration.to_dict(),
+            "bench": self.bench.to_dict(),
         }
 
 
@@ -470,6 +521,7 @@ _SECTIONS: dict[str, type] = {
     "sft": SftConfig,
     "lora": LoraConfig,
     "abliteration": AbliterationConfig,
+    "bench": BenchConfig,
 }
 
 
@@ -497,6 +549,9 @@ def _coerce_value(where: str, target: Any, value: Any, *, from_text: bool = Fals
         # list of paths or names: a single value becomes a list of one element
         (item_type,) = typing.get_args(target)
         items = value if isinstance(value, list) else [value]
+        if from_text and isinstance(value, str):
+            # `--set bench.names=gsm8k,other` — several values separated by commas
+            items = [item.strip() for item in value.split(",")]
         if all(isinstance(item, (str, Path)) and str(item).strip() for item in items):
             return [item_type(str(item)) for item in items]
     elif target is Path:
@@ -705,6 +760,7 @@ def validate_config(cfg: JoltConfig) -> JoltConfig:
     if cfg.method == ABLITERATE_METHOD:
         _validate_abliteration(cfg)
     _validate_lora(cfg)
+    _validate_bench(cfg.bench)
     return cfg
 
 
@@ -734,6 +790,28 @@ def _validate_lora(cfg: JoltConfig) -> None:
         raise ConfigError(f"lora.targets contains duplicates: {lora.targets}")
     if lora.quant_block_size < 2 or lora.quant_block_size % 2:
         raise ConfigError(f"lora.quant_block_size must be an even number ≥ 2, got {lora.quant_block_size}")
+
+
+def _validate_bench(bench: BenchConfig) -> None:
+    """Invariants of the `bench` section: every benchmark exists before hours of training are spent."""
+    if bench.every < 0:
+        raise ConfigError(f"bench.every must be ≥ 0 (0 — only at the start and the end), got {bench.every}")
+    _validate_epochs("bench.every_epochs", bench.every_epochs)
+    if bench.limit < 0:
+        raise ConfigError(f"bench.limit must be ≥ 0 (0 — the whole split), got {bench.limit}")
+    if bench.seed < 0:
+        raise ConfigError(f"bench.seed must be non-negative, got {bench.seed}")
+    for name in ("max_new_tokens", "batch_size"):
+        if getattr(bench, name) < 1:
+            raise ConfigError(f"bench.{name} must be ≥ 1, got {getattr(bench, name)}")
+    if len({benchmark_path(name).resolve() for name in bench.names}) != len(bench.names):
+        raise ConfigError(f"bench.names contains duplicates: {bench.names}")
+    for name in bench.names:
+        if not (benchmark_path(name) / "dataset.json").is_file():
+            raise ConfigError(
+                f"bench.names: benchmark {name!r} not found — expected a jolt-tasks directory {benchmark_path(name)} "
+                f"(available in bench/: {sorted(path.parent.name for path in BENCH_ROOT.glob('*/dataset.json'))})"
+            )
 
 
 def _validate_sft(sft: SftConfig) -> None:
@@ -915,6 +993,7 @@ def clone_config(cfg: JoltConfig) -> JoltConfig:
         ),
         lora=LoraConfig(**cfg.lora.to_dict()),
         abliteration=AbliterationConfig(**cfg.abliteration.to_dict() | {"prompts": Path(cfg.abliteration.prompts)}),
+        bench=BenchConfig(**cfg.bench.to_dict()),
     )
 
 
@@ -937,6 +1016,7 @@ def _duration(cfg: JoltConfig) -> str:
 
 __all__ = [
     "ABLITERATE_METHOD",
+    "BENCH_ROOT",
     "DISTILL_METHODS",
     "DTYPES",
     "ENGINES",
@@ -956,6 +1036,7 @@ __all__ = [
     "TEACHER_METHODS",
     "UNSET_PATH",
     "AbliterationConfig",
+    "BenchConfig",
     "ConfigError",
     "EvalConfig",
     "JoltConfig",
@@ -967,6 +1048,7 @@ __all__ = [
     "SftConfig",
     "TaskConfig",
     "apply_overrides",
+    "benchmark_path",
     "clone_config",
     "describe",
     "load_config",

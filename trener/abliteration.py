@@ -666,6 +666,11 @@ def run_abliteration(
     artifacts.write_config(cfg)
     fingerprint = prompts_fingerprint(section.prompts)
     artifacts.write_env(policy.info | {"prompts": fingerprint, "init_from": str(init_from) if init_from else None})
+    if cfg.bench.names and cfg.bench.at_start:
+        from .benchmarks import run_training_benchmarks
+
+        # the weights before ablation; the study itself does not run benchmarks (`bench.every` does not apply)
+        run_training_benchmarks(cfg, policy, artifacts.run_dir, label="baseline", step=None, init_from=init_from)
 
     tokenizer = policy.tokenizer
 
@@ -774,6 +779,10 @@ def run_abliteration(
         ablator.apply(params)
         final = evaluator()
         _write_json(Path(artifacts.eval_dir) / "final.json", evaluator.record(final) | {"trial": chosen.number})
+        if cfg.bench.names:
+            from .benchmarks import run_training_benchmarks
+
+            run_training_benchmarks(cfg, policy, artifacts.run_dir, label="final", step=None, init_from=init_from)
         pareto = sorted(
             (_trial_row(trial) for trial in study.best_trials), key=lambda row: (row["refusal_rate"], row["kl"])
         )

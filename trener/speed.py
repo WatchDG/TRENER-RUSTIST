@@ -1,7 +1,7 @@
-"""Measure training step speed: `python -m trener bench`.
+"""Measure training step speed: `python -m trener speed`.
 
 Runs several training steps without checkpoints and evaluation and summarizes
-the phase times into `bench.json` (run directory `runs/<run.name>/`). The first
+the phase times into `speed.json` (run directory `runs/<run.name>/`). The first
 step — warmup (allocator, CUDA kernels, graph capture) — is not included in
 the medians.
 """
@@ -82,8 +82,8 @@ def format_table(summary: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def run_bench(cfg: JoltConfig, steps: int) -> dict[str, Any]:
-    """Runs `steps` training steps without checkpoints and evaluation; writes `bench.json`.
+def run_speed(cfg: JoltConfig, steps: int) -> dict[str, Any]:
+    """Runs `steps` training steps without checkpoints and evaluation; writes `speed.json`.
 
     Returns:
         Dictionary with the config, metrics of all steps and a summary
@@ -110,7 +110,7 @@ def run_bench(cfg: JoltConfig, steps: int) -> dict[str, Any]:
         metrics = trainer.step(batch)
         rows.append(metrics.to_dict())
         logger.info(
-            "bench step %d/%d: %.1fs (rollout %.1fs, scoring %.1fs, update %.1fs) peak=%.2f GB reserved=%.2f GB",
+            "speed step %d/%d: %.1fs (rollout %.1fs, scoring %.1fs, update %.1fs) peak=%.2f GB reserved=%.2f GB",
             metrics.step,
             steps,
             metrics.step_time_s,
@@ -130,10 +130,10 @@ def run_bench(cfg: JoltConfig, steps: int) -> dict[str, Any]:
     }
     run_dir = Path(cfg.run_dir)
     run_dir.mkdir(parents=True, exist_ok=True)
-    target = run_dir / "bench.json"
+    target = run_dir / "speed.json"
     target.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     logger.info("measurement written: %s", target)
     return result
 
 
-__all__ = ["MEDIAN_FIELDS", "format_table", "run_bench", "summarize_steps"]
+__all__ = ["MEDIAN_FIELDS", "format_table", "run_speed", "summarize_steps"]

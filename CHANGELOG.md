@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-03
+
+### Added
+
+- Model benchmarks (`trener/benchmarks.py`, `docs/11-benchmarks.md`): a benchmark is a `jolt-tasks` directory in
+  `bench/` with a `test` split; it measures the current weights (the student prompt, greedy decoding, the same
+  path as `eval`) and writes a self-contained report — `<label>.json` (benchmark seal, model, run, settings,
+  environment, metrics, per-task results), `<label>.md` and `<label>.completions.jsonl`. Metrics: `accuracy` by the
+  last `\boxed{}` with a 95% Wilson interval, `accuracy_flexible` (the last number without `\boxed{}`),
+  `no_answer_rate`, `truncated_rate`, `mean_completion_tokens`.
+- `bench/gsm8k`: the whole GSM8K test split (1319 tasks, `openai/gsm8k` at a fixed revision, MIT) and its builder
+  `scripts/build_bench_gsm8k.py`.
+- `python -m trener bench run` — measure the config's model, a checkpoint or an assembled model
+  (`reports/<benchmark>/<label>.*`); `python -m trener bench compare` — compare reports (files or directories):
+  one table per benchmark, Δ against the first report, fixed / broken tasks and the exact McNemar p on the same
+  tasks.
+- Optional benchmarks during training: the `bench` config section (`names`, `every` / `every_epochs`, `at_start`,
+  `limit`, `seed`, `max_new_tokens`, `batch_size`) and `--bench NAME` of `train` and `sequence`. Reports at
+  `step-0`, every `bench.every` steps and at the end go to `runs/<run>/bench/<benchmark>/`, with
+  `runs/<run>/bench/summary.md` comparing them by step; `abliterate` measures `baseline` and `final`; a `sequence`
+  stage skips `step-0` already measured at the end of the previous stage.
+- `--set` of a list field accepts comma-separated values (`--set bench.names=gsm8k,other`).
+
+### Changed
+
+- **Breaking:** the step speed measurement `python -m trener bench` is now `python -m trener speed`
+  (`trener/speed.py`, `runs/<run.name>/speed.json` instead of `bench.json`); `bench` is the model benchmarks.
+
 ## [0.4.1] - 2026-11-03
 
 ### Fixed
@@ -101,7 +129,8 @@ First release.
 - Tests that need the LFM3 tokenizer are skipped when `models/LFM3-1.7B` is
   absent instead of failing.
 
-[Unreleased]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.2.0...v0.3.0

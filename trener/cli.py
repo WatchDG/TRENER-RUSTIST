@@ -1,6 +1,8 @@
-"""CLI of the pipeline: `python -m trener {train,sequence,bench,eval,summarize,data}`.
+"""CLI of the pipeline: `python -m trener {train,sequence,speed,bench,eval,summarize,data}`.
 
 `train` runs every method of the config, including `sft` and `abliterate` (`trener/abliteration.py`).
+`bench` measures a model on the benchmarks of `bench/` and compares the reports (`trener/benchmarks.py`);
+`speed` measures the training step time.
 
 Exit codes: 0 — success, 1 — configuration/environment error.
 """
@@ -15,6 +17,7 @@ import os
 import random
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -84,11 +87,20 @@ def _apply_cuda_alloc_conf(cfg: JoltConfig) -> None:
     logger.info("PYTORCH_CUDA_ALLOC_CONF=%s", value)
 
 
+def _overrides(args: argparse.Namespace) -> list[str]:
+    """`--set` overrides plus `--bench NAME` (the `train`/`sequence` shorthand for `--set bench.names=...`)."""
+    overrides = list(getattr(args, "set", None) or [])
+    names = getattr(args, "bench", None)
+    if names:
+        overrides.append(f"bench.names={','.join(names)}")
+    return overrides
+
+
 def _load(args: argparse.Namespace) -> JoltConfig:
     cfg = load_config(args.config)
-    overrides = getattr(args, "set", None)
+    overrides = _overrides(args)
     if overrides:
-        cfg = apply_overrides(cfg, list(overrides))
+        cfg = apply_overrides(cfg, overrides)
     resolve_eval_batch_size(cfg)
     _apply_cuda_alloc_conf(cfg)
     return cfg
@@ -165,7 +177,10 @@ def run_training(
 
     from .data import epoch_progress, iter_batches
 
+    if cfg.bench.names and cfg.bench.at_start and start_step == 0:
+        _run_benchmarks(cfg, policy, artifacts, 0, init_from)  # reference point: the initial weights
     last_eval_step = -1
+    last_bench_step = -1
     batches = iter_batches(tasks, cfg.rollout.batch_size, cfg.optim.steps, cfg.run.seed)
     total_epochs = epoch_progress(cfg.optim.steps, cfg.rollout.batch_size, len(tasks))
     logger.info(
@@ -205,6 +220,9 @@ def run_training(
             if cfg.eval.every and metrics.step % cfg.eval.every == 0:
                 _run_eval(cfg, policy, artifacts, metrics.step)
                 last_eval_step = metrics.step
+            if cfg.bench.names and cfg.bench.every and metrics.step % cfg.bench.every == 0:
+                _run_benchmarks(cfg, policy, artifacts, metrics.step, init_from)
+                last_bench_step = metrics.step
             if cfg.run.checkpoint_every and metrics.step % cfg.run.checkpoint_every == 0:
                 trainer.save_checkpoint(metrics.step)
     except KeyboardInterrupt:
@@ -220,6 +238,8 @@ def run_training(
         trainer.save_checkpoint(completed, wait=True, final=True)
     if completed != last_eval_step:
         _run_eval(cfg, policy, artifacts, completed)
+    if completed and completed != last_bench_step:
+        _final_benchmarks(cfg, policy, artifacts, completed, interrupted, init_from)
     artifacts.write_curves()
     artifacts.write_summary(_summary_payload(cfg, artifacts, completed))
     if interrupted:
@@ -254,6 +274,30 @@ def _run_eval(cfg: JoltConfig, policy: Any, artifacts: Any, step: int) -> None:
     policy.reset_decoder()
     gc.collect()
     _release_cuda_cache()
+
+
+def _run_benchmarks(cfg: JoltConfig, policy: Any, artifacts: Any, step: int, init_from: Any = None) -> None:
+    """Benchmarks of the current weights (`bench` section): reports in `<run_dir>/bench/<benchmark>/step-<N>.*`."""
+    from .benchmarks import run_training_benchmarks
+
+    run_training_benchmarks(cfg, policy, artifacts.run_dir, label=f"step-{step}", step=step, init_from=init_from)
+
+
+def _final_benchmarks(
+    cfg: JoltConfig, policy: Any, artifacts: Any, step: int, interrupted: bool, init_from: Any = None
+) -> None:
+    """Benchmarks at the end of a run; an interrupted run is not measured (it may take minutes)."""
+    if not cfg.bench.names:
+        return
+    if interrupted:
+        checkpoint = Path(artifacts.run_dir) / "checkpoints" / f"step-{step}"
+        logger.info(
+            "run interrupted: benchmarks skipped — measure later with "
+            "`python -m trener bench run --config <config> --checkpoint %s`",
+            checkpoint,
+        )
+        return
+    _run_benchmarks(cfg, policy, artifacts, step, init_from)
 
 
 def _release_cuda_cache() -> None:
@@ -294,28 +338,94 @@ def cmd_sequence(args: argparse.Namespace) -> int:
     """Sequential training: stages from the configs chained together (`trener/sequence.py`)."""
     from .sequence import load_sequence, run_sequence
 
-    seq = load_sequence(
-        args.config, extra_overrides=getattr(args, "set", None), init_from=getattr(args, "init_from", None)
-    )
+    seq = load_sequence(args.config, extra_overrides=_overrides(args), init_from=getattr(args, "init_from", None))
     # the CUDA allocator is configured once, before the first stage
     _apply_cuda_alloc_conf(seq.stages[0].cfg)
     return run_sequence(seq)
 
 
-# ------------------------------------------------------------------- bench
+# ------------------------------------------------------------------- speed
 
 
-def cmd_bench(args: argparse.Namespace) -> int:
-    """Measures step speed: several steps without checkpoints and evaluation, `bench.json`."""
-    from .bench import format_table, run_bench
+def cmd_speed(args: argparse.Namespace) -> int:
+    """Measures step speed: several steps without checkpoints and evaluation, `speed.json`."""
+    from .speed import format_table, run_speed
 
     cfg = _load(args)
     if cfg.method == SFT_METHOD:
-        raise ConfigError("bench measures a JOLT step; for sft look at update_tok_s in the run's metrics.jsonl")
+        raise ConfigError("speed measures a JOLT step; for sft look at update_tok_s in the run's metrics.jsonl")
     if cfg.method == ABLITERATE_METHOD:
-        raise ConfigError("bench measures a JOLT step; abliterate logs trial_s per trial in the run's metrics.jsonl")
-    result = run_bench(cfg, int(args.steps))
+        raise ConfigError("speed measures a JOLT step; abliterate logs trial_s per trial in the run's metrics.jsonl")
+    result = run_speed(cfg, int(args.steps))
     print(format_table(result))
+    return 0
+
+
+# ------------------------------------------------------------------- bench
+
+
+def _default_label(cfg: JoltConfig, checkpoint: Path | None) -> str:
+    """Report name: `<run>-step-<N>` for a run checkpoint, else the checkpoint or model directory, plus the time."""
+    if checkpoint is not None:
+        parent = checkpoint.parent
+        stem = f"{parent.parent.name}-{checkpoint.name}" if parent.name == "checkpoints" else checkpoint.name
+    else:
+        stem = Path(cfg.model.path).name
+    return f"{stem}-{datetime.now():%Y%m%d-%H%M%S}"
+
+
+def cmd_bench_run(args: argparse.Namespace) -> int:
+    """Measures a model (the config's model, a checkpoint) on benchmarks; reports in `<out>/<benchmark>/<label>.*`."""
+    from .benchmarks import format_metrics, resolve_benchmark, run_benchmark, write_report
+    from .modeling import load_policy
+    from .trainer import load_model_weights
+
+    cfg = _load(args)
+    names = list(args.bench or cfg.bench.names)
+    if not names:
+        raise ConfigError("no benchmarks: pass --bench NAME (bench/<NAME>) or set bench.names in the config")
+    for name in names:
+        resolve_benchmark(name)  # a typo shows up before the model is loaded
+    if args.limit is not None:
+        if args.limit < 0:
+            raise ConfigError(f"--limit must be ≥ 0 (0 — the whole split), got {args.limit}")
+        cfg.bench.limit = int(args.limit)
+    checkpoint = Path(args.checkpoint) if args.checkpoint else None
+    if checkpoint is not None and not checkpoint.exists():
+        raise FileNotFoundError(f"checkpoint not found: {checkpoint}")
+    label = args.name or _default_label(cfg, checkpoint)
+    out = Path(args.out)
+    _seed_everything(cfg.run.seed)
+    policy = load_policy(cfg, with_master=False)
+    if checkpoint is not None:
+        # only model weights: the optimizer and fp32 master copies are not needed for a measurement
+        load_model_weights(policy, checkpoint)
+    for name in names:
+        report, completions = run_benchmark(
+            policy,
+            name,
+            cfg.bench,
+            label=label,
+            rollout=cfg.rollout,
+            model={"path": cfg.model.path, "checkpoint": checkpoint},
+        )
+        path = write_report(report, completions, out / report["benchmark"]["name"])
+        print(format_metrics(report))
+        print(f"report: {path}")
+    return 0
+
+
+def cmd_bench_compare(args: argparse.Namespace) -> int:
+    """Compares benchmark reports (files or directories); Markdown to stdout and optionally to a file."""
+    from .benchmarks import compare_reports
+
+    text = compare_reports(args.paths)
+    print(text)
+    if args.out:
+        out = Path(args.out)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(text + "\n", encoding="utf-8", newline="\n")
+        logger.info("comparison written: %s", out)
     return 0
 
 
@@ -539,6 +649,10 @@ def _print_corpus_plan(args: argparse.Namespace) -> None:
 # ------------------------------------------------------------------- main
 
 
+#: `--bench` of `train` and `sequence`.
+BENCH_FLAG_HELP = "benchmark during training (bench/<NAME>); repeatable, shorthand for --set bench.names=..."
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Builds the CLI argument parser."""
     parser = argparse.ArgumentParser(prog="python -m trener", description="JOLT / JOLT+ training pipeline")
@@ -562,6 +676,7 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="KEY=VALUE",
         help="override a single config field (e.g. --set optim.lr=2e-6)",
     )
+    train.add_argument("--bench", action="append", default=None, metavar="NAME", help=BENCH_FLAG_HELP)
     train.set_defaults(func=cmd_train)
 
     sequence = sub.add_parser("sequence", help="sequential training over a list of configs (checkpoint chain)")
@@ -578,19 +693,44 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="checkpoint directory: the first stage starts from its weights (not from the base model or its init_from)",
     )
+    sequence.add_argument("--bench", action="append", default=None, metavar="NAME", help=BENCH_FLAG_HELP)
     sequence.set_defaults(func=cmd_sequence)
 
-    bench = sub.add_parser("bench", help="measure training step speed (without checkpoints and evaluation)")
-    bench.add_argument("--config", required=True, help="path to the YAML configuration")
-    bench.add_argument("--steps", type=int, default=3, help="number of steps (the first is warmup; default 3)")
-    bench.add_argument(
+    speed = sub.add_parser("speed", help="measure training step speed (without checkpoints and evaluation)")
+    speed.add_argument("--config", required=True, help="path to the YAML configuration")
+    speed.add_argument("--steps", type=int, default=3, help="number of steps (the first is warmup; default 3)")
+    speed.add_argument(
         "--set",
         action="append",
         default=None,
         metavar="KEY=VALUE",
         help="override a single config field (e.g. --set rollout.engine=static)",
     )
-    bench.set_defaults(func=cmd_bench)
+    speed.set_defaults(func=cmd_speed)
+
+    bench = sub.add_parser("bench", help="model benchmarks: measure, compare reports (docs/11-benchmarks.md)")
+    bench_actions = bench.add_subparsers(dest="action", required=True)
+    bench_run = bench_actions.add_parser("run", help="measure a model or checkpoint and write reports")
+    bench_run.add_argument("--config", required=True, help="config: model, generation engine, bench section")
+    bench_run.add_argument("--checkpoint", default=None, help="checkpoint directory instead of the base model")
+    bench_run.add_argument(
+        "--bench", action="append", default=None, metavar="NAME", help="benchmark (bench/<NAME> or a path); repeatable"
+    )
+    bench_run.add_argument("--limit", type=int, default=None, help="tasks per benchmark (0 — the whole split)")
+    bench_run.add_argument("--name", default=None, help="report name (default <model or run-step>-<time>)")
+    bench_run.add_argument("--out", default="reports", help="reports directory (default reports/)")
+    bench_run.add_argument(
+        "--set",
+        action="append",
+        default=None,
+        metavar="KEY=VALUE",
+        help="override a single config field (e.g. --set bench.max_new_tokens=2048)",
+    )
+    bench_run.set_defaults(func=cmd_bench_run)
+    bench_compare = bench_actions.add_parser("compare", help="compare reports: files or directories")
+    bench_compare.add_argument("paths", nargs="+", help="report JSON files or directories (searched recursively)")
+    bench_compare.add_argument("--out", default=None, help="Markdown file for the comparison")
+    bench_compare.set_defaults(func=cmd_bench_compare)
 
     evaluate = sub.add_parser("eval", help="evaluate a checkpoint")
     evaluate.add_argument("--config", required=True, help="path to the YAML configuration")

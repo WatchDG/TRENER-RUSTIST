@@ -1,9 +1,9 @@
 """Epochs → steps: resolution of the run length and intervals set in epochs.
 
-A config states the run length, the warmup, the checkpoint and the evaluation interval either
-in steps (`optim.steps`, `optim.warmup_steps`, `run.checkpoint_every`, `eval.every`) or in
-epochs (`optim.epochs`, `optim.warmup_epochs`, `run.checkpoint_every_epochs`,
-`eval.every_epochs`). The epoch size in steps is known only after the data is loaded, so a
+A config states the run length, the warmup, the checkpoint, evaluation and benchmark intervals
+either in steps (`optim.steps`, `optim.warmup_steps`, `run.checkpoint_every`, `eval.every`,
+`bench.every`) or in epochs (`optim.epochs`, `optim.warmup_epochs`, `run.checkpoint_every_epochs`,
+`eval.every_epochs`, `bench.every_epochs`). The epoch size in steps is known only after the data is loaded, so a
 run resolves the config once (`resolve_schedule`) and everything downstream — optimizer,
 loops, summary, sequence — sees steps only.
 
@@ -23,7 +23,7 @@ def resolve_schedule(cfg: JoltConfig, steps_per_epoch: float) -> JoltConfig:
 
     Total steps — ``max(1, ceil(epochs * steps_per_epoch))`` (the same rounding as
     `corpus.steps_for_epochs`); warmup — ``round`` (may be 0); checkpoint and evaluation
-    intervals — ``round``, at least 1. A config without epoch values is returned as a copy.
+    intervals (and the benchmark interval) — ``round``, at least 1. A config without epoch values is returned as a copy.
     """
     if not math.isfinite(steps_per_epoch) or steps_per_epoch <= 0:
         raise ValueError(f"steps_per_epoch must be > 0, got {steps_per_epoch}")
@@ -40,6 +40,9 @@ def resolve_schedule(cfg: JoltConfig, steps_per_epoch: float) -> JoltConfig:
     if resolved.eval.every_epochs > 0:
         resolved.eval.every = max(1, round(resolved.eval.every_epochs * steps_per_epoch))
         resolved.eval.every_epochs = 0
+    if resolved.bench.every_epochs > 0:
+        resolved.bench.every = max(1, round(resolved.bench.every_epochs * steps_per_epoch))
+        resolved.bench.every_epochs = 0
     return resolved
 
 
@@ -52,11 +55,12 @@ def schedule_info(cfg: JoltConfig, resolved: JoltConfig, steps_per_epoch: float)
         "warmup_steps": resolved.optim.warmup_steps,
         "checkpoint_every": resolved.run.checkpoint_every,
         "eval_every": resolved.eval.every,
+        "bench_every": resolved.bench.every,
     }
 
 
 def with_steps(cfg: JoltConfig, steps: int) -> JoltConfig:
-    """Copy of the config with a fixed number of steps (for `bench` and measurements without a full run)."""
+    """Copy of the config with a fixed number of steps (for `speed` and measurements without a full run)."""
     fixed = clone_config(cfg)
     fixed.optim.steps = steps
     fixed.optim.epochs = 0

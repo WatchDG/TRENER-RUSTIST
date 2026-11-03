@@ -189,7 +189,14 @@ def build_plan(cfg: JoltConfig, tokenizer: Any) -> tuple[SftPlan, list[Document]
 def run_sft(cfg: JoltConfig, *, init_from: str | Path | None = None, resume: str | Path | None = None) -> TrainResult:
     """Runs `sft` with a ready configuration; `init_from` and `resume` are mutually exclusive."""
     from .artifacts import RunArtifacts
-    from .cli import TrainResult, _release_cuda_cache, _seed_everything, _summary_payload
+    from .cli import (
+        TrainResult,
+        _final_benchmarks,
+        _release_cuda_cache,
+        _run_benchmarks,
+        _seed_everything,
+        _summary_payload,
+    )
     from .data import load_tasks
     from .modeling import load_policy
     from .schedule import resolve_schedule, schedule_info
@@ -233,9 +240,12 @@ def run_sft(cfg: JoltConfig, *, init_from: str | Path | None = None, resume: str
 
     last_eval_step = -1
     last_saved_step = -1
+    last_bench_step = -1
     if start_step == 0 and test_docs:
         # reference point: NLL of the initial weights on the corpus test split
         artifacts.log_metrics({"step": 0, **_eval_step(cfg, policy, artifacts, test_docs, 0)})
+    if start_step == 0 and cfg.bench.names and cfg.bench.at_start:
+        _run_benchmarks(cfg, policy, artifacts, 0, init_from)
     interrupted = False
     try:
         for step in range(start_step, cfg.optim.steps):
@@ -246,6 +256,9 @@ def run_sft(cfg: JoltConfig, *, init_from: str | Path | None = None, resume: str
                 row |= _eval_step(cfg, policy, artifacts, test_docs, metrics.step)
                 last_eval_step = metrics.step
             artifacts.log_metrics(row)
+            if cfg.bench.names and cfg.bench.every and metrics.step % cfg.bench.every == 0:
+                _run_benchmarks(cfg, policy, artifacts, metrics.step, init_from)
+                last_bench_step = metrics.step
             logger.info(
                 "step %d/%d (epoch %.2f): loss=%.4f tokens=%d grad=%.3f lr=%.2e %.1fs",
                 metrics.step,
@@ -279,6 +292,8 @@ def run_sft(cfg: JoltConfig, *, init_from: str | Path | None = None, resume: str
             if final:
                 artifacts.log_metrics({"step": completed, **final})
         _write_coverage(artifacts, plan, completed)
+        if completed != last_bench_step:
+            _final_benchmarks(cfg, policy, artifacts, completed, interrupted, init_from)
     artifacts.write_curves()
     artifacts.write_summary(_summary_payload(cfg, artifacts, completed))
     logger.info("run %s: %s", "stopped" if interrupted else "finished", cfg.run_dir)

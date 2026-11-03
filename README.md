@@ -64,6 +64,13 @@ py -3.13 -m venv .venv
 
 Presets, evaluation, resume and the run directory layout: [docs/07-usage.md](docs/07-usage.md).
 
+Measure a model on GSM8K (standalone or with `--bench gsm8k` during training) and compare the reports:
+
+```powershell
+.venv\Scripts\python.exe -m trener bench run --config configs/rust_std/rust_keywords_jolt.yaml --bench gsm8k
+.venv\Scripts\python.exe -m trener bench compare reports/gsm8k
+```
+
 ## Repository layout
 
 | Path | Contents |
@@ -71,6 +78,8 @@ Presets, evaluation, resume and the run directory layout: [docs/07-usage.md](doc
 | `trener/` | The pipeline package (`python -m trener`) |
 | `configs/` | Training presets (`smoke_*` — short checks, `rust_std/`, `rust_cargo/`, `sft_*`, `sequence_*`, `abliterate_*`) |
 | `datasets/` | Task sets (`rust/`, `reverse-rust/`), documentation corpora (`rust-docs/`) and a contrast prompt set example (`abliteration/`), see [docs/06-data.md](docs/06-data.md) |
+| `bench/` | Model benchmarks (`gsm8k`), see [docs/11-benchmarks.md](docs/11-benchmarks.md) |
+| `reports/` | Reports of `python -m trener bench run` |
 | `scripts/` | Dataset and corpus builders, profiling and memory tools, `chat.py` |
 | `tests/` | `pytest` suite (`-m slow` — integration tests on the real model) |
 | `docs/` | Method and pipeline documentation |
@@ -89,6 +98,7 @@ Presets, evaluation, resume and the run directory layout: [docs/07-usage.md](doc
 | [docs/08-sft.md](docs/08-sft.md) | The `sft` stage before JOLT: training on a pre-built documentation corpus (rustdoc JSON), coverage and NLL |
 | [docs/09-lora.md](docs/09-lora.md) | Optional LoRA and QLoRA: frozen (optionally 4-bit NF4) base and low-rank adapters for any method, fine-tuning and continuing an adapter |
 | [docs/10-abliteration.md](docs/10-abliteration.md) | Abliteration for experiments: ablating the refusal direction from the weights, Optuna search on refusal rate and KL, contrast prompt sets |
+| [docs/11-benchmarks.md](docs/11-benchmarks.md) | Model benchmarks (GSM8K): standalone or during training, self-contained reports, comparison of reports |
 
 ## Supported models
 
@@ -114,5 +124,5 @@ with the JOLT paper: [arXiv:2610.10447](https://arxiv.org/abs/2610.10447).
 
 [Apache-2.0](LICENSE), © 2026 Baranov Grigoriy Vladimirovich. See also [NOTICE](NOTICE).
 
-Parts of `datasets/` are derived from the documentation of the Rust standard library and third-party crates
-and remain under their licenses: see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+Parts of `datasets/` are derived from the documentation of the Rust standard library and third-party crates,
+and `bench/gsm8k` is GSM8K (MIT); they remain under their licenses: see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

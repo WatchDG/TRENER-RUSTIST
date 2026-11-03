@@ -1,0 +1,15 @@
+{
+  "format": "jolt-tasks",
+  "format_version": 1,
+  "name": "gsm8k",
+  "description": "GSM8K test: grade-school math word problems, the answer is a number (1319 tasks)",
+  "source": "https://huggingface.co/datasets/openai/gsm8k@740312add88f781978c0658806c59bc2815b9866 (main/test-00000-of-00001.parquet)",
+  "default_answer_type": "number",
+  "splits": {
+    "test": {
+      "file": "test.jsonl",
+      "records": 1319,
+      "sha256": "93b5f091b9ad0f16d5325a98cdc30b0f484d3b1454028c4a9dc1ca4a3d5cc269"
+    }
+  }
+}

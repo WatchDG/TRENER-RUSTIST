@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING, Any
 from .config import RolloutConfig
 from .prompts import build_prompts
 from .rewards import verify
-from .rollout import STUDENT, generate
+from .rollout import STUDENT, Trajectory, generate
 
 if TYPE_CHECKING:  # pragma: no cover - for typing only
     from .config import EvalConfig
@@ -107,6 +107,42 @@ def _select_tasks(tasks: Sequence[Task], limit: int, seed: int) -> list[Task]:
     return [tasks[index] for index in indices]
 
 
+def generate_greedy(
+    policy: Policy,
+    tasks: Sequence[Task],
+    cfg: EvalConfig,
+    *,
+    seed: int = 0,
+    rollout: RolloutConfig | None = None,
+) -> list[Trajectory]:
+    """One greedy student trajectory per task, in task order (prompts without `c`).
+
+    `cfg` gives `max_new_tokens` and the micro-batch size; `rollout` — the generation engine.
+
+    Raises:
+        RuntimeError: The number of trajectories does not match the number of tasks.
+    """
+    # Privileged information is not used in the evaluation: the student branch
+    # is built without `c`.
+    prompt_pairs = [build_prompts(task, privileged=None, tokenizer=policy.tokenizer) for task in tasks]
+
+    trajectories = generate(
+        policy,
+        prompt_pairs,
+        _rollout_config(cfg, rollout),
+        STUDENT,
+        group_size=1,
+        max_new_tokens=int(cfg.max_new_tokens),
+        do_sample=False,
+        seed=int(seed),
+    )
+    if len(trajectories) != len(tasks):
+        raise RuntimeError(
+            f"number of trajectories ({len(trajectories)}) does not match the number of tasks ({len(tasks)})"
+        )
+    return trajectories
+
+
 def evaluate(
     policy: Policy,
     tasks: Sequence[Task],
@@ -137,25 +173,7 @@ def evaluate(
         raise ValueError("task list for evaluation is empty")
 
     selected = _select_tasks(tasks, int(cfg.limit), int(seed))
-
-    # Privileged information is not used in the evaluation: the student branch
-    # is built without `c`.
-    prompt_pairs = [build_prompts(task, privileged=None, tokenizer=policy.tokenizer) for task in selected]
-
-    trajectories = generate(
-        policy,
-        prompt_pairs,
-        _rollout_config(cfg, rollout),
-        STUDENT,
-        group_size=1,
-        max_new_tokens=int(cfg.max_new_tokens),
-        do_sample=False,
-        seed=int(seed),
-    )
-    if len(trajectories) != len(selected):
-        raise RuntimeError(
-            f"number of trajectories ({len(trajectories)}) does not match the number of tasks ({len(selected)})"
-        )
+    trajectories = generate_greedy(policy, selected, cfg, seed=seed, rollout=rollout)
 
     per_task: list[dict[str, Any]] = []
     n_correct = 0
@@ -194,4 +212,4 @@ def evaluate(
     )
 
 
-__all__ = ["EVAL_MICRO_BATCH_SIZE", "MAX_COMPLETION_CHARS", "EvalResult", "evaluate"]
+__all__ = ["EVAL_MICRO_BATCH_SIZE", "MAX_COMPLETION_CHARS", "EvalResult", "evaluate", "generate_greedy"]

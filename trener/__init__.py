@@ -8,6 +8,6 @@ Formalization: ``docs/01-jolt.md`` (weights), ``docs/02-algorithm.md`` (step),
 ``docs/04-implementation.md`` (requirements).
 """
 
-__version__ = "0.4.1"
+__version__ = "0.5.0"
 
 __all__ = ["__version__"]

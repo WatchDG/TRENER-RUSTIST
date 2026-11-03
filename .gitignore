@@ -3,6 +3,8 @@ checkpoints/
 runs/
 wandb/
 outputs/
+# Benchmark reports (`bench run`, docs/11-benchmarks.md)
+/reports/
 *.pt
 *.safetensors
 *.bin

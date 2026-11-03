@@ -71,7 +71,7 @@ Learning rate. An adapter needs a much larger step than full training: about 10�
 - The adapter is not merged into the weights for the rollout: each target layer adds two small matrix
   multiplications to the decode step (measurement below).
 
-Measurement (`bench --steps 3`, RTX 4090, the two smoke presets, `B=2`, `G=2`, `max_new_tokens=128`; full training
+Measurement (`speed --steps 3`, RTX 4090, the two smoke presets, `B=2`, `G=2`, `max_new_tokens=128`; full training
 with `optim.master_storage: split`): peak VRAM 11.24 → 4.51 GB, decode step 6.2 → 9.4 ms, step 1.72 → 2.00 s;
 `r=16` on all linear layers is 16.5 M trainable parameters of 1.75 B. A final checkpoint takes ≈3.4 GB
 (`model.safetensors`), an intermediate one ≈70 MB.
@@ -175,7 +175,7 @@ cross-scoring and the gradient passes go through the same quantized model, so th
 sees the same NF4 weights. The `static` engine captures the dequantization into its CUDA graph; with
 `model.compile_kernels` it is compiled into one Triton kernel (`nf4×N` in the `fused kernels` log line).
 
-Measurement (`bench --steps 3`, RTX 4090, `smoke_lora_rust_keywords_jolt.yaml` against
+Measurement (`speed --steps 3`, RTX 4090, `smoke_lora_rust_keywords_jolt.yaml` against
 `smoke_qlora_rust_keywords_jolt.yaml`, both with `model.compile_kernels`, 2026-11-03): peak VRAM 4.50 → 2.50 GB
 (reserved 4.83 → 2.97 GB), decode step 8.6 → 9.0 ms, step 1.90 → 2.10 s. The first step is longer (17.8 s against
 5.5 s): it compiles the dequantization for every weight shape.
