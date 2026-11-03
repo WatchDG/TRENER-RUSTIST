@@ -12,6 +12,12 @@ contain no third-party text.
 The benchmarks in `bench/` are third-party test sets converted to the task
 format as is (`scripts/build_bench_gsm8k.py`).
 
+`trener/architectures/spark2_5.py` reimplements the Spark-X2.6 architecture
+after `configuration_spark.py` and `modeling_spark.py` of
+[XHToken/Spark-X2.6-1.7B](https://huggingface.co/XHToken/Spark-X2.6-1.7B)
+(Apache-2.0, Copyright 2026 The XHToken team and the HuggingFace Inc. team);
+the Apache-2.0 text is in [LICENSE](LICENSE).
+
 ## Sources
 
 | Source | Version | Used in | License | Copyright |

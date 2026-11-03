@@ -5,9 +5,10 @@ import sys
 from pathlib import Path
 
 import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoTokenizer
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from trener.architectures import read_architecture  # noqa: E402
 from trener.modeling import build_policy  # noqa: E402
 from trener.prompts import student_system_prompt  # noqa: E402
 from trener.trainer import load_model_weights  # noqa: E402
@@ -24,7 +25,10 @@ def main() -> None:
     args = parser.parse_args()
 
     tokenizer = AutoTokenizer.from_pretrained(args.base, trust_remote_code=True)
-    model = AutoModelForCausalLM.from_pretrained(args.base, torch_dtype=torch.bfloat16, trust_remote_code=True)
+    # the model is built as its architecture prescribes (`architectures` of the model's config.json)
+    model = read_architecture(args.base).load(
+        Path(args.base), dtype=torch.bfloat16, attn_implementation="sdpa", trust_remote_code=True
+    )
     # a LoRA checkpoint without model.safetensors is rebuilt from its base and the adapter
     policy = build_policy(model, tokenizer, model_path=Path(args.base), device=torch.device("cuda"), with_master=False)
     load_model_weights(policy, args.checkpoint)

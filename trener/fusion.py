@@ -60,11 +60,17 @@ def _is_gated_mlp(module: torch.nn.Module) -> bool:
     )
 
 
+def _model_code(model: torch.nn.Module) -> set[str]:
+    """Modules with the code of the model's layers: where its RoPE function lives."""
+    return {type(module).__module__ for module in model.modules() if type(module).__name__.endswith("Attention")}
+
+
 def fuse_model(model: torch.nn.Module) -> list[str]:
     """Replaces the model's RMSNorm, MLP and RoPE with fused versions; returns what was replaced.
 
     RMSNorm and MLP are replaced on the instances of this model's modules; RoPE is the function of the
-    module with the model's code (`apply_rotary_pos_emb`), i.e. for all models of this class in the process.
+    module with the model's code (`apply_rotary_pos_emb` of the checkpoint's code or of
+    `trener.architectures.<architecture>`), i.e. for all models of this class in the process.
     The NF4 dequantization (QLoRA layers) is likewise replaced in `trener.quant` for the whole process.
     A repeated call changes nothing; `unfuse_model` restores the original functions.
     """
@@ -81,7 +87,7 @@ def fuse_model(model: torch.nn.Module) -> list[str]:
         module.forward = functools.partial(_cuda_only(type(module).forward), module)
         patched[kind] = patched.get(kind, 0) + 1
 
-    for code in {type(module).__module__ for module in model.modules() if hasattr(module, "q_proj")}:
+    for code in _model_code(model):
         namespace = sys.modules[code]
         rope = getattr(namespace, "apply_rotary_pos_emb", None)
         if rope is not None and not hasattr(rope, "jolt_original"):
@@ -104,7 +110,7 @@ def unfuse_model(model: torch.nn.Module) -> None:
     for module in model.modules():
         if isinstance(vars(module).get("forward"), functools.partial):
             del module.forward
-    for code in {type(module).__module__ for module in model.modules() if hasattr(module, "q_proj")}:
+    for code in _model_code(model):
         namespace = sys.modules[code]
         rope = getattr(namespace, "apply_rotary_pos_emb", None)
         if rope is not None and hasattr(rope, "jolt_original"):

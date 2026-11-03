@@ -106,9 +106,9 @@ def test_documents_not_covering_row_use_standard_path() -> None:
 # ------------------------------------------------------------ whole model
 
 
-@pytest.fixture(params=["llama", "lfm3"])
-def policy(request: pytest.FixtureRequest, tiny_policy: Any, tiny_lfm3_policy: Any) -> Any:
-    return tiny_policy if request.param == "llama" else tiny_lfm3_policy
+@pytest.fixture(params=["llama", "lfm3", "spark"])
+def policy(request: pytest.FixtureRequest) -> Any:
+    return request.getfixturevalue(f"tiny_{request.param}_policy" if request.param != "llama" else "tiny_policy")
 
 
 def _items(count: int = 5) -> list[tuple[list[int], list[int]]]:
@@ -138,7 +138,7 @@ def test_packed_forward_attends_by_documents(policy: Any, monkeypatch: pytest.Mo
     monkeypatch.setattr(attention_module, "_document_attention", spy)
     items = _items()
     score_sequences(policy, items, max_tokens=10_000)
-    layers = sum(1 for module in policy.model.modules() if hasattr(module, "q_proj"))
+    layers = sum(1 for module in policy.model.modules() if type(module).__name__.endswith("Attention"))
     assert len(calls) == layers
     assert calls[0] == tuple(sorted((len(p) + len(c) for p, c in items), reverse=True))
 

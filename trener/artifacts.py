@@ -47,6 +47,7 @@ ENV_KEYS = (
     "dtype",
     "model_path",
     "model_fingerprint",
+    "architecture",
     "n_parameters",
     "n_trainable_parameters",
     "lora",

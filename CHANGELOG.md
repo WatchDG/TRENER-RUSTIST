@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-03
+
+### Added
+
+- Spark-X2.6-1.7B (`Spark2_5ForCausalLM`, [XHToken/Spark-X2.6-1.7B](https://huggingface.co/XHToken/Spark-X2.6-1.7B)):
+  the pipeline's own implementation of the architecture (`trener/architectures/spark2_5.py`) with the checkpoint's
+  module names — sliding and full attention layers with their own partial RoPE, a fused `q_k_v_proj`, a per-head
+  output gate, a GELU MLP and an fp32 residual stream. It gives the logits of the checkpoint's code bitwise
+  (`attn_implementation: eager`) and, unlike that code, runs in transformers 5, takes the RoPE positions from
+  `position_ids` (left-padded batches, packed rows) and goes through the attention interface (`jolt_sdpa`, the
+  static decode engine with its CUDA graph, packed scoring per document). Smoke preset
+  `configs/smoke_spark_rust_keywords_jolt.yaml`.
+- `trener/architectures/`: what the pipeline does differently for a model follows from `architectures` of its
+  `config.json`, one module per architecture (`lfm3.py`, `spark2_5.py`): how the model is built (the checkpoint's
+  code or the pipeline's own implementation) and which projections abliteration edits. Other architectures get the
+  `AutoModelForCausalLM` and Llama-like module names. `policy.info["architecture"]` records the architecture.
+
+### Changed
+
+- The abliteration targets come from the model's architecture instead of probing one shared list of module names.
+- The model fingerprint covers sharded weights (`model.safetensors.index.json` and its shards) when there is no
+  `model.safetensors`; the fingerprint of a single-file model is unchanged.
+- `trener.fusion` finds the RoPE function in the code of the model's attention modules (`*Attention`), not of
+  modules with a `q_proj`.
+
 ## [0.5.0] - 2026-11-03
 
 ### Added
@@ -129,7 +154,8 @@ First release.
 - Tests that need the LFM3 tokenizer are skipped when `models/LFM3-1.7B` is
   absent instead of failing.
 
-[Unreleased]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.3.0...v0.4.0

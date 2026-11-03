@@ -257,7 +257,8 @@ runs/<name>/
   directions are computed.
 - Evaluation: `python -m trener eval --config <config> --checkpoint runs/<name>/checkpoints/final` — accuracy on a
   task set before and after; `scripts/chat.py runs/<name>/checkpoints/final "<question>"` — a single answer.
-- Outside trener: `AutoModelForCausalLM.from_pretrained("runs/<name>/model", trust_remote_code=True)`.
+- Outside trener: `AutoModelForCausalLM.from_pretrained("runs/<name>/model", trust_remote_code=True)` (LFM3);
+  `Spark2_5ForCausalLM.from_pretrained("runs/<name>/model")` from `trener.architectures.spark2_5` (Spark2_5).
 
 ## 7. Restrictions
 
@@ -267,9 +268,10 @@ runs/<name>/
   edit — or compare the answers with `scripts/chat.py`).
 - The answers of the edited model are not verified medically: a model without refusals may answer confidently and
   wrongly. Use it for research, not for medical decisions without expert review.
-- The γ correction of §3.3 is written for the LFM3 post-norm (`γ ⊙ x / rms(x)`, `post_operator_norm`,
-  `post_ffn_norm`). Projections are found in LFM3 layers and in Llama-like ones (`self_attn.o_proj`,
-  `mlp.down_proj`, no post-norm); other architectures are not supported.
+- The projections and post-norms come from the model's architecture (`trener.architectures`): LFM3 (`conv.out_proj`
+  or `self_attn.o_proj`, `feed_forward.w2`, the post-norms `post_operator_norm`, `post_ffn_norm` with the γ
+  correction of §3.3), Spark2_5 (`self_attn.out_proj`, `mlp.down_proj`, no post-norm), any other — Llama-like
+  names (`self_attn.o_proj`, `mlp.down_proj`, no post-norm).
 - KL is measured on the first token of the `good` prompts only (§4.2).
 - `lora.enabled: true` is rejected; `speed` does not measure `abliterate` (time per trial is `trial_s` in
   `metrics.jsonl`).

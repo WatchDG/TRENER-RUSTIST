@@ -10,12 +10,13 @@ A run (`run_abliteration`):
    prompts and the first-token KL on the `good` prompts of the evaluation split (`trener.refusal`).
 4. The chosen trial is applied once more; the weights go to `checkpoints/final`, a loadable model to `model/`.
 
-A trial edits the output projections of the layers: the operator (`conv.out_proj` or `self_attn.o_proj`) and
-the MLP (`feed_forward.w2`). For layer ℓ and component c with the weight ``λ`` and the direction ``v``:
-``W' = W − λ·u·(uᵀW)``, ``u = normalize(γ ⊙ v)``. In LFM3 the output of each component passes through a
-post-norm with the per-channel gain ``γ`` (sandwich norm) before it reaches the residual, and only the
-projection on ``γ ⊙ v`` removes ``v`` from what is added there. The original weights stay on the device:
-every trial starts from them.
+A trial edits the output projections of the layers, named by the model's architecture (`trener.architectures`):
+the operator (LFM3: `conv.out_proj` or `self_attn.o_proj`, Spark2_5: `self_attn.out_proj`) and the MLP
+(LFM3: `feed_forward.w2`, Spark2_5: `mlp.down_proj`). For layer ℓ and component c with the weight ``λ`` and the
+direction ``v``: ``W' = W − λ·u·(uᵀW)``, ``u = normalize(γ ⊙ v)``. In LFM3 the output of each component passes
+through a post-norm with the per-channel gain ``γ`` (sandwich norm) before it reaches the residual, and only the
+projection on ``γ ⊙ v`` removes ``v`` from what is added there; without a post-norm ``u = v``. The original
+weights stay on the device: every trial starts from them.
 """
 
 from __future__ import annotations
@@ -38,6 +39,7 @@ import torch
 import torch.nn.functional as F
 
 from . import __version__
+from .architectures import architecture_of
 from .config import EVAL_AUTO_MAX_BATCH, ConfigError, EvalConfig, JoltConfig
 from .prompt_sets import load_prompts, prompts_fingerprint, read_prompts_manifest
 from .refusal import REFUSAL_MARKERS, first_token_logprobs, kl_first_token, pad_token_id, refusal_rate, right_padded
@@ -51,15 +53,6 @@ logger = logging.getLogger(__name__)
 
 #: Components of a layer that write into the residual stream.
 COMPONENTS = ("operator", "mlp")
-
-#: Output projection of a component within a decoder layer: names probed in order.
-_COMPONENT_MODULES = {
-    "operator": ("conv.out_proj", "self_attn.o_proj", "self_attn.out_proj"),
-    "mlp": ("feed_forward.w2", "mlp.down_proj"),
-}
-
-#: Post-norm of a component's output in a sandwich-norm layer (LFM3: `γ ⊙ x / rms(x)`).
-_POST_NORMS = {"operator": "post_operator_norm", "mlp": "post_ffn_norm"}
 
 #: Search space; positions are fractions of the last layer index `L = N − 1`.
 DIRECTION_INDEX_RANGE = (0.4, 0.9)
@@ -114,19 +107,24 @@ def _submodule(root: torch.nn.Module, path: str) -> Any:
 
 
 def find_targets(model: Any) -> list[AblationTarget]:
-    """The operator and MLP output projections of every layer, with the gains of their post-norms."""
+    """The operator and MLP output projections of every layer, with the gains of their post-norms.
+
+    The module names come from the model's architecture (`Architecture.projections`, `Architecture.post_norms`).
+    """
+    architecture = architecture_of(model)
     targets: list[AblationTarget] = []
     for index, layer in enumerate(decoder_layers(model)):
         for component in COMPONENTS:
-            for path in _COMPONENT_MODULES[component]:
+            paths = architecture.projections[component]
+            for path in paths:
                 module = _submodule(layer, path)
                 if isinstance(module, torch.nn.Linear):
                     break
             else:
-                raise RuntimeError(
-                    f"layer {index}: no {component} output projection among {list(_COMPONENT_MODULES[component])}"
-                )
-            norm = getattr(layer, _POST_NORMS[component], None) if getattr(layer, "use_sandwich_norm", False) else None
+                raise RuntimeError(f"layer {index}: no {component} output projection among {list(paths)}")
+            post_norm = architecture.post_norms.get(component)
+            sandwich = post_norm is not None and getattr(layer, "use_sandwich_norm", False)
+            norm = getattr(layer, post_norm, None) if sandwich else None
             gain = norm.weight.detach() if norm is not None else None
             targets.append(AblationTarget(index, component, f"layers.{index}.{path}", module, gain))
     return targets

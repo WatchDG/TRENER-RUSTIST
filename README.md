@@ -102,13 +102,19 @@ Measure a model on GSM8K (standalone or with `--bench gsm8k` during training) an
 
 ## Supported models
 
-| Model | Hugging Face | Configs |
-|---|---|---|
-| LFM3-1.7B | [LiquidAI/LFM3-1.7B](https://huggingface.co/LiquidAI/LFM3-1.7B) | `configs/` (default path `models/LFM3-1.7B`) |
+| Model | Architecture | Hugging Face | Configs |
+|---|---|---|---|
+| LFM3-1.7B | `Lfm3ForCausalLM` | [LiquidAI/LFM3-1.7B](https://huggingface.co/LiquidAI/LFM3-1.7B) | `configs/` (default path `models/LFM3-1.7B`) |
+| Spark-X2.6-1.7B | `Spark2_5ForCausalLM` | [XHToken/Spark-X2.6-1.7B](https://huggingface.co/XHToken/Spark-X2.6-1.7B) | `configs/smoke_spark_rust_keywords_jolt.yaml`; any config with `--set model.path=models/Spark-X2.6-1.7B` |
 
 The standard configs expect the model in `models/LFM3-1.7B` relative to the repository root. The pipeline does not
 download it: fetch the model in advance and place it there (`snapshot_download` command in
 [docs/07-usage.md](docs/07-usage.md#71a-model)), or set `model.path` to another directory.
+
+What the pipeline does differently for a model follows from its architecture — the `architectures` field of the
+model's `config.json` — and each architecture is described in its own module of `trener/architectures/`: LFM3 is
+built by the checkpoint's code (`trust_remote_code`), Spark2_5 by the pipeline's own implementation
+(`trener/architectures/spark2_5.py`; the checkpoint's code does not run in transformers 5).
 
 ## Contributing
 

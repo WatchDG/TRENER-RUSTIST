@@ -31,38 +31,45 @@ def _rope(policy: Any) -> Any:
     return sys.modules[type(policy.model.model.layers[2]).__module__].apply_rotary_pos_emb
 
 
-def test_fuse_patches_lfm3_and_is_reversible(tiny_lfm3_policy: Any) -> None:
+@pytest.fixture(params=["lfm3", "spark"])
+def tiny(request: pytest.FixtureRequest) -> Any:
+    """Small models of the architectures with their own RMSNorm, MLP and RoPE: LFM3 and Spark2_5."""
+    return request.getfixturevalue(f"tiny_{request.param}_policy")
+
+
+def test_fuse_patches_and_is_reversible(tiny: Any) -> None:
     """All RMSNorm, MLP and RoPE are replaced; a repeated call changes nothing; `unfuse_model` restores the original."""
-    model = tiny_lfm3_policy.model
+    model = tiny.model
     norms = sum(1 for module in model.modules() if type(module).__name__.endswith("RMSNorm"))
-    rope = _rope(tiny_lfm3_policy)
+    rope = _rope(tiny)
     try:
         assert sorted(fuse_model(model)) == ["mlp×6", f"rms_norm×{norms}", "rope×1"]
+        assert _rope(tiny) is not rope
         assert fuse_model(model) == []
     finally:
         unfuse_model(model)
-    assert _rope(tiny_lfm3_policy) is rope
+    assert _rope(tiny) is rope
     assert not any("forward" in vars(module) for module in model.modules())
 
 
-def test_fused_model_on_cpu_is_unchanged(tiny_lfm3_policy: Any) -> None:
+def test_fused_model_on_cpu_is_unchanged(tiny: Any) -> None:
     """On CPU the fused versions are not used: the values are bitwise the same."""
     items = _items()
-    expected = score_sequences(tiny_lfm3_policy, items, max_tokens=1000)
-    fuse_model(tiny_lfm3_policy.model)
+    expected = score_sequences(tiny, items, max_tokens=1000)
+    fuse_model(tiny.model)
     try:
-        actual = score_sequences(tiny_lfm3_policy, items, max_tokens=1000)
+        actual = score_sequences(tiny, items, max_tokens=1000)
     finally:
-        unfuse_model(tiny_lfm3_policy.model)
+        unfuse_model(tiny.model)
     for want, got in zip(expected, actual, strict=True):
         assert torch.equal(got, want)
 
 
 @CUDA
-def test_fused_kernels_match_on_cuda(tokenizer: Any, tiny_lfm3_policy: Any) -> None:
+def test_fused_kernels_match_on_cuda(tokenizer: Any, tiny: Any) -> None:
     """CUDA, fp32: scoring, gradients (with gradient checkpointing) and greedy graph decoding match the unfused run."""
     torch.manual_seed(0)
-    model = type(tiny_lfm3_policy.model)(tiny_lfm3_policy.model.config)
+    model = type(tiny.model)(tiny.model.config)
     policy = build_policy(model, tokenizer, device=torch.device("cuda"), dtype="float32", with_master=False)
     policy.set_gradient_checkpointing(True)
     items = _items()

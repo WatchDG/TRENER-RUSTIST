@@ -1,12 +1,15 @@
 """Model loading, fp32 master weights, and model fingerprint.
 
-The model is loaded in bf16 on CUDA with `trust_remote_code=True` (custom LFM3 architecture). An fp32 master copy
-of the weights is kept alongside it, because the step `lr≈1e-6` is below the bf16 resolution (docs/07-usage.md §7.8).
+The model is loaded in bf16 on CUDA as its architecture prescribes (`trener.architectures`, by `architectures` of the
+model's `config.json`): LFM3 by the checkpoint's code (`trust_remote_code=True`), Spark2_5 by the pipeline's own
+implementation. An fp32 master copy of the weights is kept alongside it, because the step `lr≈1e-6` is below the
+bf16 resolution (docs/07-usage.md §7.8).
 """
 
 from __future__ import annotations
 
 import hashlib
+import json
 import platform
 import sys
 import warnings
@@ -16,8 +19,9 @@ from typing import Any
 
 import torch
 import transformers
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoTokenizer
 
+from .architectures import architecture_names, architecture_of, read_architecture
 from .attention import use_jolt_attention
 from .config import JoltConfig, LoraConfig
 from .fusion import fuse_model
@@ -70,6 +74,9 @@ _FINGERPRINT_FILES = ("config.json", "tokenizer_config.json", "generation_config
 
 #: Weights file: its size and modification time are part of the fingerprint.
 _WEIGHTS_FILE = "model.safetensors"
+
+#: Index of sharded weights (`model-0000N-of-0000M.safetensors`) when there is no single weights file.
+_WEIGHTS_INDEX = "model.safetensors.index.json"
 
 
 @dataclass
@@ -164,8 +171,16 @@ class Policy:
         self.model.eval()
 
 
+def _weight_files(model_path: Path) -> list[str]:
+    """Weights files of the model: `model.safetensors`, or the index of sharded weights and its shards."""
+    if (model_path / _WEIGHTS_FILE).exists() or not (model_path / _WEIGHTS_INDEX).exists():
+        return [_WEIGHTS_FILE]
+    index = json.loads((model_path / _WEIGHTS_INDEX).read_text(encoding="utf-8"))
+    return [_WEIGHTS_INDEX, *sorted(set(index.get("weight_map", {}).values()))]
+
+
 def _fingerprint(model_path: Path) -> str:
-    """sha256 of the model configs, the size and mtime of the weights file."""
+    """sha256 of the model configs, the size and mtime of the weights files."""
     digest = hashlib.sha256()
     for name in _FINGERPRINT_FILES:
         path = model_path / name
@@ -174,12 +189,13 @@ def _fingerprint(model_path: Path) -> str:
             digest.update(path.read_bytes())
         else:
             digest.update(b"<missing>")
-    weights = model_path / _WEIGHTS_FILE
-    if weights.exists():
-        stat = weights.stat()
-        digest.update(f"{_WEIGHTS_FILE}:{stat.st_size}:{int(stat.st_mtime)}".encode())
-    else:
-        digest.update(f"{_WEIGHTS_FILE}:<missing>".encode())
+    for name in _weight_files(model_path):
+        weights = model_path / name
+        if weights.exists():
+            stat = weights.stat()
+            digest.update(f"{name}:{stat.st_size}:{int(stat.st_mtime)}".encode())
+        else:
+            digest.update(f"{name}:<missing>".encode())
     return digest.hexdigest()
 
 
@@ -276,7 +292,7 @@ def build_policy(
 ) -> Policy:
     """Builds a `Policy` from a ready model and tokenizer.
 
-    Used by both `load_policy` and the tests (a small model instead of LFM3).
+    Used by both `load_policy` and the tests (a small model instead of a real checkpoint).
     `with_master=False` — without fp32 master copies (evaluation without training).
     `master_storage="split"` — master as the bf16 model weights plus `int16` low halves (no persistent fp32
     tensors); `master_offload` — residuals in pinned RAM. `lora` — freeze the model and attach adapters
@@ -336,7 +352,8 @@ def build_policy(
         "master_storage": master_storage if with_master else None,
         "master_offload": offload,
         "attn_implementation": getattr(model.config, "_attn_implementation", None),
-        "trust_remote_code": model_path is not None,
+        "architecture": (architecture_names(model.config) or [type(model).__name__])[0],
+        "trust_remote_code": model_path is not None and not architecture_of(model).native,
         **_gpu_info(),
     }
 
@@ -387,11 +404,11 @@ def load_policy(cfg: JoltConfig, *, with_master: bool = True) -> Policy:
         str(model_path),
         trust_remote_code=cfg.model.trust_remote_code,
     )
-    model = AutoModelForCausalLM.from_pretrained(
-        str(model_path),
+    model = read_architecture(model_path).load(
+        model_path,
         dtype=dtype,
-        trust_remote_code=cfg.model.trust_remote_code,
         attn_implementation=cfg.model.attn_implementation,
+        trust_remote_code=cfg.model.trust_remote_code,
     )
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     policy = build_policy(

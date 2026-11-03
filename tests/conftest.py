@@ -172,3 +172,39 @@ def tiny_lfm3_policy(tokenizer: Any) -> Any:
     torch.manual_seed(0)
     model = AutoModelForCausalLM.from_config(config, trust_remote_code=True, dtype=torch.float32)
     return build_policy(model, tokenizer, device=torch.device("cpu"), dtype="float32", with_master=False)
+
+
+@pytest.fixture(scope="session")
+def tiny_spark_policy(tokenizer: Any) -> Any:
+    """Small random model of the Spark2_5 architecture (sliding + full attention, partial RoPE, per-head gate).
+
+    The pipeline's own implementation (`trener.architectures.spark2_5`) with the configuration of Spark-X2.6 scaled
+    down; it needs no checkpoint, and the vocabulary is that of the LFM3 tokenizer.
+    """
+    import torch
+    from trener.architectures.spark2_5 import Spark2_5Config, Spark2_5ForCausalLM
+    from trener.modeling import build_policy
+
+    config = Spark2_5Config(
+        vocab_size=128000,
+        hidden_size=64,
+        intermediate_size=128,
+        num_hidden_layers=6,
+        num_attention_heads=4,
+        num_key_value_heads=2,
+        head_dim=32,
+        layer_types=["sliding_attention"] * 2 + ["full_attention"] + ["sliding_attention"] * 2 + ["full_attention"],
+        sliding_window=32,
+        rope_parameters={
+            "full_attention": {"rope_theta": 5_000_000, "partial_rotary_factor": 0.25},
+            "sliding_attention": {"rope_theta": 10_000, "partial_rotary_factor": 1.0},
+        },
+        headwise_attn_output_gate=True,
+        tie_word_embeddings=True,
+        pad_token_id=tokenizer.pad_token_id,
+        bos_token_id=tokenizer.bos_token_id,
+        eos_token_id=tokenizer.eos_token_id,
+    )
+    torch.manual_seed(0)
+    model = Spark2_5ForCausalLM(config)
+    return build_policy(model, tokenizer, device=torch.device("cpu"), dtype="float32", with_master=False)

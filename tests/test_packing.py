@@ -10,9 +10,9 @@ import trener.scoring as scoring_module
 from trener.scoring import pack_rows, score_sequences
 
 
-@pytest.fixture(params=["llama", "lfm3"])
-def policy(request: pytest.FixtureRequest, tiny_policy: Any, tiny_lfm3_policy: Any) -> Any:
-    return tiny_policy if request.param == "llama" else tiny_lfm3_policy
+@pytest.fixture(params=["llama", "lfm3", "spark"])
+def policy(request: pytest.FixtureRequest) -> Any:
+    return request.getfixturevalue(f"tiny_{request.param}_policy" if request.param != "llama" else "tiny_policy")
 
 
 def _items(count: int = 7, seed: int = 0) -> list[tuple[list[int], list[int]]]:

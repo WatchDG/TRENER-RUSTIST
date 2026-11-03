@@ -38,10 +38,10 @@ def _random_prompts(count: int = 6, seed: int = 3) -> list[list[int]]:
     return [torch.randint(10, 5000, (length,), generator=generator).tolist() for length in lengths]
 
 
-@pytest.fixture(params=["llama", "lfm3"])
-def policy(request: pytest.FixtureRequest, tiny_policy: Any, tiny_lfm3_policy: Any) -> Any:
-    """CPU models: Llama (full attention) and LFM3 (conv + full + sliding window)."""
-    return tiny_policy if request.param == "llama" else tiny_lfm3_policy
+@pytest.fixture(params=["llama", "lfm3", "spark"])
+def policy(request: pytest.FixtureRequest) -> Any:
+    """CPU models: Llama (full attention), LFM3 (conv + full + sliding window), Spark2_5 (full + sliding window)."""
+    return request.getfixturevalue(f"tiny_{request.param}_policy" if request.param != "llama" else "tiny_policy")
 
 
 def _hf_reference(policy: Any, prompts: list[list[int]], new_tokens: int) -> list[list[int]]:
@@ -284,7 +284,8 @@ def test_sampling_with_full_vocab_matches_scoring_support(tiny_policy: Any) -> N
 # --------------------------------------------------------------------- CUDA graph
 
 
-def _cuda_policy(kind: str, tokenizer: Any, lfm3: Any) -> Any:
+def _cuda_policy(kind: str, tokenizer: Any, template: Any) -> Any:
+    """A model on CUDA: a small Llama, or a fresh model of the architecture and config of `template`."""
     torch.manual_seed(0)
     if kind == "llama":
         config = LlamaConfig(
@@ -302,15 +303,16 @@ def _cuda_policy(kind: str, tokenizer: Any, lfm3: Any) -> Any:
         )
         model: Any = LlamaForCausalLM(config)
     else:
-        model = type(lfm3.model)(lfm3.model.config)
+        model = type(template.model)(template.model.config)
     return build_policy(model, tokenizer, device=torch.device("cuda"), dtype="float32", with_master=False)
 
 
 @CUDA
-@pytest.mark.parametrize("kind", ["llama", "lfm3"])
-def test_cuda_graph_matches_eager(kind: str, tokenizer: Any, tiny_lfm3_policy: Any) -> None:
+@pytest.mark.parametrize("kind", ["llama", "lfm3", "spark"])
+def test_cuda_graph_matches_eager(kind: str, tokenizer: Any, request: pytest.FixtureRequest) -> None:
     """The graph matches the eager loop token by token: greedy, and when sampling with the same seed."""
-    policy = _cuda_policy(kind, tokenizer, tiny_lfm3_policy)
+    template = request.getfixturevalue(f"tiny_{kind}_policy") if kind != "llama" else None
+    policy = _cuda_policy(kind, tokenizer, template)
     prompts = _random_prompts()
     for do_sample in (False, True):
         results = {}
@@ -387,9 +389,12 @@ def test_rollout_without_cuda_graphs_flag_uses_eager(tiny_policy: Any, sample_ta
 # ------------------------------------------------------------ sliding-layer ring without `roll`
 
 
-def test_ring_wraps_several_times_without_roll(tiny_lfm3_policy: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("kind", ["lfm3", "spark"])
+def test_ring_wraps_several_times_without_roll(
+    kind: str, request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Decoding 3x the window: `static` matches `hf` and the teacher-forced argmax; `roll` is not called."""
-    policy = tiny_lfm3_policy
+    policy = request.getfixturevalue(f"tiny_{kind}_policy")
     window = policy.model.config.sliding_window
     steps = 3 * window + 5
     prompts = _random_prompts(5)
@@ -413,9 +418,10 @@ def test_ring_wraps_several_times_without_roll(tiny_lfm3_policy: Any, monkeypatc
 
 
 @CUDA
-def test_ring_graph_matches_eager_over_many_wraps(tokenizer: Any, tiny_lfm3_policy: Any) -> None:
+@pytest.mark.parametrize("kind", ["lfm3", "spark"])
+def test_ring_graph_matches_eager_over_many_wraps(kind: str, tokenizer: Any, request: pytest.FixtureRequest) -> None:
     """The graph with the ring and no `roll` matches eager token by token over several ring wraps."""
-    policy = _cuda_policy("lfm3", tokenizer, tiny_lfm3_policy)
+    policy = _cuda_policy(kind, tokenizer, request.getfixturevalue(f"tiny_{kind}_policy"))
     window = policy.model.config.sliding_window
     prompts = _random_prompts()
     results = {}

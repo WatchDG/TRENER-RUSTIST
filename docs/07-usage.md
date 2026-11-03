@@ -12,7 +12,7 @@ contracts are in the docstrings of the corresponding `trener/` modules.
 | Driver | 617.42 (verified: `nvidia-smi`, CUDA UMD 13.4) |
 | Python | 3.13 (3.14 lags behind in `torch`/`tokenizers` wheels) |
 | OS | Windows, PowerShell |
-| Model | local directory `models\LFM3-1.7B` relative to the repository root (LFM3-1.7B, custom architecture, `trust_remote_code=True`); must be downloaded in advance, see 7.1a |
+| Model | local directory `models\LFM3-1.7B` relative to the repository root (LFM3-1.7B, custom architecture, `trust_remote_code=True`), or `models\Spark-X2.6-1.7B` (Spark-X2.6-1.7B, the pipeline's own implementation); must be downloaded in advance, see 7.1a |
 | Disk | ~9.9 GB per checkpoint (bf16 model weights ~3.2 GB + fp32 master weights ~6.6 GB) |
 
 ### 7.1a Model
@@ -26,6 +26,31 @@ The standard configs (`configs/`) take the model from `models/LFM3-1.7B` relativ
 
 Relative paths in configs (`model.path`, `task.dataset`, `run.out_dir`, `sft.corpus`) are resolved against the
 repository root, not the current directory. To use a model from another location, pass `--set model.path=<dir>` or change `model.path` in the config.
+
+Spark-X2.6-1.7B goes to `models/Spark-X2.6-1.7B`; `configs/smoke_spark_rust_keywords_jolt.yaml` is the smoke preset
+on it, and any other config runs on it with `--set model.path=models/Spark-X2.6-1.7B`:
+
+```powershell
+.venv\Scripts\python.exe -c "from huggingface_hub import snapshot_download; snapshot_download('XHToken/Spark-X2.6-1.7B', local_dir='models/Spark-X2.6-1.7B')"
+```
+
+**Architectures.** What differs between models is decided by the architecture named in `architectures` of the
+model's `config.json`, not by its name or path; each architecture is described in its own module of
+`trener/architectures/` (`Architecture`):
+
+| Architecture | Module | How the model is built | Abliteration projections |
+|---|---|---|---|
+| `Lfm3ForCausalLM` | `lfm3.py` | the checkpoint's code (`modeling_lfm3.py`, `model.trust_remote_code: true`) | `conv.out_proj` / `self_attn.o_proj`, `feed_forward.w2`; sandwich post-norms |
+| `Spark2_5ForCausalLM` | `spark2_5.py` | the pipeline's own implementation; `model.trust_remote_code` is not used | `self_attn.out_proj`, `mlp.down_proj` |
+| any other | — | `AutoModelForCausalLM` | `self_attn.o_proj`, `mlp.down_proj` |
+
+The Spark checkpoint's code (`modeling_spark.py`) does not load in transformers 5 and does not fit the pipeline:
+its RoPE positions come from `cache_position` (wrong for a left-padded batch and for packed rows) and its attention
+is always eager. `spark2_5.py` computes the same with the same weights (bitwise for `attn_implementation: eager`,
+`tests/test_architectures.py`), with the positions from `position_ids` and attention through `transformers`
+(`sdpa` → `jolt_sdpa`). Its residual stream is fp32, as in the checkpoint's code. The Spark chat template ends the
+generation prompt with `<think>` but renders an assistant turn without reasoning as `</think>answer`, so `qa` records
+of an SFT corpus ([08-sft.md](08-sft.md)) need a `thinking` field on this model.
 
 The `models/` directory is in `.gitignore` and is not committed.
 
@@ -58,7 +83,7 @@ Checking the environment:
 .venv\Scripts\python.exe -c "import trener; print(trener.__version__)"
 ```
 
-Expected: `2.13.0+cu130 13.0 True` and `0.5.0`.
+Expected: `2.13.0+cu130 13.0 True` and `0.6.0`.
 
 Data: the presets read tasks from the dataset directory `datasets/rust/rust-keywords-0001` (field `task.dataset`,
 format — [06-data.md](06-data.md)). Checking the dataset:
@@ -81,6 +106,7 @@ The dialogue where "the model asks a question and evaluates the user's answer" (
 | `method: jolt+` in `configs/rust_std/rust_keywords_jolt.yaml` | `jolt+` | the same preset with the student reward term |
 | `method: opsd` in `configs/rust_std/rust_keywords_jolt.yaml` | `opsd` | mode without the teacher branch (`G=8`, `lr=1e-7`) |
 | `method: grpo` in `configs/rust_std/rust_keywords_jolt.yaml` | `grpo` | mode without the teacher branch and without distillation (`G=8`, `lr=1e-6`) |
+| `configs/smoke_spark_rust_keywords_jolt.yaml` | `jolt` | the smoke run of `rust-keywords-0001` on Spark-X2.6-1.7B (`Spark2_5ForCausalLM`, §7.1a) |
 | `configs/smoke_tutor_rust_jolt.yaml` | `jolt` | short run of the tutor mode: 3 steps, `B=2`, `G=2`, `max_new_tokens=128`, `eval.limit=8` |
 | `configs/smoke_lora_rust_keywords_jolt.yaml` | `jolt` | smoke run with LoRA: frozen base, rank-16 adapters on all linear layers, `lr=1e-5` ([09-lora.md](09-lora.md)) |
 | `configs/smoke_qlora_rust_keywords_jolt.yaml` | `jolt` | the same smoke run with QLoRA: the frozen base in 4-bit NF4 ([09-lora.md §7](09-lora.md)) |
@@ -341,7 +367,9 @@ or empty — otherwise a `configuration error` before the first stage starts (th
 are not checked and not rebuilt). Loading:
 
 ```python
-AutoModelForCausalLM.from_pretrained("dist/<name>", trust_remote_code=True)
+AutoModelForCausalLM.from_pretrained("dist/<name>", trust_remote_code=True)  # LFM3
+from trener.architectures.spark2_5 import Spark2_5ForCausalLM
+Spark2_5ForCausalLM.from_pretrained("dist/<name>")  # Spark2_5: its own code does not run in transformers 5
 ``` The model is released between stages, but the process is one:
 the `torch` compilation cache is shared.
 
