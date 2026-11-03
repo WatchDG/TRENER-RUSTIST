@@ -46,6 +46,16 @@ import torch
 from safetensors.torch import load_file, save_file
 
 from .config import JoltConfig
+from .lora import (
+    adapter_config,
+    adapter_tensors,
+    is_adapter_checkpoint,
+    load_adapter,
+    merge_adapter,
+    merged_model_state,
+    read_adapter,
+    write_adapter,
+)
 from .losses import policy_gradient_loss
 from .master import merge_master
 from .optim import build_optimizer
@@ -286,22 +296,54 @@ def load_model_weights(policy: Policy, checkpoint: str | Path) -> None:
     """Loads model weights from a checkpoint without creating the optimizer or master copies.
 
     Used by `python -m trener eval`. A tied duplicate missing from the file
-    (for example `lm_head.weight` with a shared `embed_tokens`) is normal; any other
-    missing or extra keys are an error.
+    (for example `lm_head.weight` with a shared `embed_tokens`) is normal, and so are the policy's own
+    LoRA adapters; any other missing or extra keys are an error.
+
+    A LoRA checkpoint without `model.safetensors` (not the last one of its run) is rebuilt: the weights of its
+    base (`lora_base.json`) are loaded, and the adapter is merged into them.
     """
-    model_file = Path(checkpoint) / "model.safetensors"
+    checkpoint = Path(checkpoint)
+    model_file = checkpoint / "model.safetensors"
     if not model_file.exists():
-        raise FileNotFoundError(f"checkpoint has no model weights: {model_file}")
+        if not is_adapter_checkpoint(checkpoint):
+            raise FileNotFoundError(f"checkpoint has no model weights: {model_file}")
+        tensors, config, base = read_adapter(checkpoint)
+        _load_lora_base(policy, base)
+        merge_adapter(policy, tensors, config)
+        policy.reset_decoder()
+        logger.info("model weights: base %s + adapter %s", base.get("base_checkpoint") or "model.path", checkpoint)
+        return
     state = load_file(str(model_file))
     missing, unexpected = policy.model.load_state_dict(state, strict=False)
     policy.reset_decoder()
     aliases = _tied_aliases(policy.model)
-    missing = [name for name in missing if name not in aliases]
+    own = policy.lora.param_names() if policy.lora is not None else set()
+    missing = [name for name in missing if name not in aliases and name not in own]
     if missing or unexpected:
         raise RuntimeError(
             f"checkpoint weights {model_file} do not match the model: missing {missing[:5]}, extra {unexpected[:5]}"
         )
     logger.info("model weights loaded from %s", model_file)
+
+
+def _load_lora_base(policy: Policy, base: dict[str, Any]) -> None:
+    """Loads the weights an adapter was trained on top of: its base checkpoint, or `model.path` as loaded.
+
+    Without a base checkpoint the policy must hold the untouched weights of `model.path`: their fingerprint
+    is compared with the one recorded in `lora_base.json`.
+    """
+    source = base.get("base_checkpoint")
+    if source:
+        if not Path(source).exists():
+            raise FileNotFoundError(f"base checkpoint of the adapter not found: {source}")
+        load_model_weights(policy, source)
+        return
+    fingerprint = base.get("base_fingerprint")
+    if fingerprint and fingerprint != policy.model_fingerprint:
+        raise ValueError(
+            f"the adapter was trained on top of another model ({base.get('base_model')}, "
+            f"fingerprint {fingerprint[:12]}), the loaded model has fingerprint {policy.model_fingerprint[:12]}"
+        )
 
 
 class Trainer:
@@ -324,6 +366,13 @@ class Trainer:
         self._snapshot_event: Any = None
         self._update_stats: dict[str, Any] = {}
         self._clock = _PhaseClock(False)
+        #: LoRA: the weights the adapter trains on top of (`lora_base.json` of the checkpoints): `model.path`,
+        #: or the checkpoint the run started from (`init_from`).
+        self.lora_base: dict[str, Any] = {
+            "base_model": str(cfg.model.path),
+            "base_fingerprint": policy.model_fingerprint,
+            "base_checkpoint": None,
+        }
 
     # ------------------------------------------------------------------ step
 
@@ -855,17 +904,21 @@ class Trainer:
 
     # ------------------------------------------------------------- checkpoints
 
-    def save_checkpoint(self, step: int, *, wait: bool = False) -> Path:
+    def save_checkpoint(self, step: int, *, wait: bool = False, final: bool = False) -> Path:
         """Saves a checkpoint: model weights, master weights, optimizer, and state.
 
         The tensor snapshot is copied to CPU in the main thread, while the files are written in
         the background to `step-<N>.tmp/` and atomically renamed to `step-<N>/`: an interrupted
         write leaves no incomplete `step-<N>`. A previous write is awaited before a new one starts;
         `wait=True` also awaits this one.
+
+        LoRA: the adapter (`trener.lora`, fp32 from the master) instead of `model.safetensors` and
+        `master.safetensors`; `final=True` (the last checkpoint of a run) also writes `model.safetensors`
+        with the adapter merged into the base, so the checkpoint loads like a full one.
         """
         self.wait_checkpoint()
         checkpoints = Path(self.artifacts.run_dir) / "checkpoints"
-        final = checkpoints / f"step-{step}"
+        target = checkpoints / f"step-{step}"
         staging = checkpoints / f"step-{step}.tmp"
         stalled = time.perf_counter()
 
@@ -875,8 +928,21 @@ class Trainer:
         # for the bus occupied by the weight copy
         optimizer_state = _to_cpu(self.optimizer.state_dict())
         trainer_state = _to_cpu(self._trainer_state(step))
+        lora = self.policy.lora
+        adapter: dict[str, torch.Tensor] | None = None
+        adapter_meta: dict[str, Any] = {}
+        lora_base: dict[str, Any] = {}
         snapshot = self._pinned_snapshot(aliases) if self._use_pinned_checkpoint() else None
-        if snapshot is None:
+        if lora is not None:
+            adapter = adapter_tensors(self.policy)
+            adapter_meta = adapter_config(lora, str(self.cfg.model.path))
+            lora_base = dict(self.lora_base)
+            merged = merged_model_state(self.policy, adapter, set(aliases)) if final else None
+
+            def snapshot() -> tuple[dict[str, torch.Tensor] | None, dict[str, torch.Tensor] | None]:
+                return merged, None
+
+        elif snapshot is None:
             model_state = {
                 name: tensor.detach().to("cpu").to(torch.bfloat16)
                 for name, tensor in self.policy.model.state_dict().items()
@@ -901,20 +967,24 @@ class Trainer:
                 if staging.exists():
                     shutil.rmtree(staging)
                 staging.mkdir(parents=True)
-                save_file(model_state, str(staging / "model.safetensors"))
-                save_file(master_state, str(staging / "master.safetensors"))
+                if model_state is not None:
+                    save_file(model_state, str(staging / "model.safetensors"))
+                if master_state is not None:
+                    save_file(master_state, str(staging / "master.safetensors"))
+                if adapter is not None:
+                    write_adapter(staging, adapter, adapter_meta, lora_base)
                 torch.save(optimizer_state, staging / "optimizer.pt")
                 torch.save(trainer_state, staging / "trainer_state.pt")
                 (staging / "config.json").write_text(config_json, encoding="utf-8")
                 previous = checkpoints / f"step-{step}.old"
-                if final.exists():
+                if target.exists():
                     if previous.exists():
                         shutil.rmtree(previous)
-                    os.replace(final, previous)
-                os.replace(staging, final)
+                    os.replace(target, previous)
+                os.replace(staging, target)
                 if previous.exists():
                     shutil.rmtree(previous, ignore_errors=True)
-                logger.info("checkpoint saved: %s", final)
+                logger.info("checkpoint saved: %s", target)
             except BaseException as exc:  # noqa: BLE001 - the error is re-raised in `wait_checkpoint`
                 self._checkpoint_error = exc
 
@@ -924,11 +994,12 @@ class Trainer:
         thread.start()
         if wait:
             self.wait_checkpoint()
-        return final
+        return target
 
     def _use_pinned_checkpoint(self) -> bool:
         return (
             bool(self.cfg.run.pinned_checkpoint)
+            and self.policy.lora is None  # the adapter is small: a regular snapshot
             and not self._pinned_failed
             and torch.cuda.is_available()
             and self.policy.device.type == "cuda"
@@ -1049,22 +1120,48 @@ class Trainer:
             raise FileNotFoundError(f"{checkpoint} is an incomplete write, not a checkpoint")
         return checkpoint
 
-    def _load_weights(self, checkpoint: Path) -> None:
-        """Loads model weights and fp32 master from a checkpoint (without optimizer and counters)."""
-        if (checkpoint / "model.safetensors").exists():
+    def _load_weights(self, checkpoint: Path, *, resume: bool = False) -> None:
+        """Loads model weights and fp32 master from a checkpoint (without optimizer and counters).
+
+        With LoRA (`docs/09-lora.md`): a LoRA checkpoint continues its adapter on top of the same base
+        (with `lora.merge_init` outside resume — the adapter is merged into the base, and a new one starts);
+        a full checkpoint becomes the base of the adapter.
+        """
+        policy = self.policy
+        adapter = is_adapter_checkpoint(checkpoint)
+        if resume and adapter != (policy.lora is not None):
+            kind = "a LoRA run" if adapter else "a run without LoRA"
+            raise ValueError(f"checkpoint {checkpoint} is {kind}: resume it with lora.enabled: {str(adapter).lower()}")
+        if policy.lora is None:
+            self._load_full_weights(checkpoint)
+        elif adapter and (resume or not self.cfg.lora.merge_init):
+            tensors, config, base = read_adapter(checkpoint)
+            _load_lora_base(policy, base)
+            load_adapter(policy, tensors, config)
+            self.lora_base = {**self.lora_base, **base}
+            source = base.get("base_checkpoint") or "model.path"
+            logger.info("LoRA: adapter %s continues on top of %s", checkpoint, source)
+        else:
+            load_model_weights(policy, checkpoint)  # a full checkpoint, or a LoRA one with its adapter merged
+            self.lora_base = {**self.lora_base, "base_checkpoint": str(checkpoint.resolve())}
+            logger.info("LoRA: base weights from %s, the adapter starts from scratch", checkpoint)
+        policy.reset_decoder()
+
+    def _load_full_weights(self, checkpoint: Path) -> None:
+        """Model weights and fp32 master of a policy without LoRA; a LoRA checkpoint is merged into the weights."""
+        if (checkpoint / "model.safetensors").exists() or is_adapter_checkpoint(checkpoint):
             load_model_weights(self.policy, checkpoint)
 
         master_file = checkpoint / "master.safetensors"
-        if master_file.exists():
-            state = load_file(str(master_file))
-            # master is the source of truth: the model weights are synchronized with it (`set_master_fp32`).
-            for index, name in enumerate(self.policy.master_names):
-                key = f"master.{name}"
-                if key in state:
-                    self.policy.set_master_fp32(index, state[key])
-                else:
-                    self.policy.set_master_fp32(index, self.policy.master_fp32(index))
-        self.policy.reset_decoder()
+        state = load_file(str(master_file)) if master_file.exists() else {}
+        # master is the source of truth: the model weights are synchronized with it (`set_master_fp32`);
+        # without a saved master it follows the loaded weights, or the first step would restore the old ones
+        for index, name in enumerate(self.policy.master_names):
+            key = f"master.{name}"
+            if key in state:
+                self.policy.set_master_fp32(index, state[key])
+            else:
+                self.policy.set_master_fp32(index, self.policy.master_params[index].data.float())
 
     def init_from(self, path: str | Path) -> None:
         """Starts a new run from the checkpoint weights: step 0, optimizer and token counters from scratch.
@@ -1073,14 +1170,19 @@ class Trainer:
         suitable for fine-tuning on a different set of tasks.
         """
         checkpoint = self._checkpoint_dir(path)
-        if not (checkpoint / "model.safetensors").exists() and not (checkpoint / "master.safetensors").exists():
-            raise FileNotFoundError(f"directory {checkpoint} has neither model.safetensors nor master.safetensors")
+        if not any((checkpoint / name).exists() for name in ("model.safetensors", "master.safetensors")) and (
+            not is_adapter_checkpoint(checkpoint)
+        ):
+            raise FileNotFoundError(
+                f"directory {checkpoint} has neither model.safetensors nor master.safetensors "
+                "nor a LoRA adapter (adapter_model.safetensors)"
+            )
         self._load_weights(checkpoint)
 
     def resume(self, path: str | Path) -> int:
         """Restores the state from a checkpoint; returns the step number."""
         checkpoint = self._checkpoint_dir(path)
-        self._load_weights(checkpoint)
+        self._load_weights(checkpoint, resume=True)
 
         optimizer_file = checkpoint / "optimizer.pt"
         if optimizer_file.exists():

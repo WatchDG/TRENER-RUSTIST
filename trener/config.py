@@ -266,6 +266,42 @@ class EvalConfig:
         }
 
 
+@dataclass
+class LoraConfig:
+    """Low-rank adapters (`trener/lora.py`, `docs/09-lora.md`): the base weights are frozen, only the adapters train.
+
+    Each target `nn.Linear` gets `W·x + (alpha / r)·B·A·x`; `B` starts at zero, so the adapted model initially
+    equals the base. Works with every method; the optimizer and the fp32 master cover only the adapters.
+    """
+
+    enabled: bool = False
+    r: int = 16
+    alpha: float = 32.0
+    #: Dropout on the adapter input; only `method: sft` (in JOLT the own-context `ℓ` of the training pass
+    #: must equal `log π̄` of the snapshot).
+    dropout: float = 0.0
+    #: Short names of the `nn.Linear` modules to adapt (`q_proj`, `w1`, `in_proj`, …); empty — all linear
+    #: layers except the output embeddings (`lm_head`).
+    targets: list[str] = field(default_factory=list)
+    #: `--init-from` of a LoRA checkpoint: merge its adapter into the base and train a new one
+    #: (by default the run continues training the same adapter).
+    merge_init: bool = False
+
+    @property
+    def scale(self) -> float:
+        return float(self.alpha) / int(self.r)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "enabled": self.enabled,
+            "r": self.r,
+            "alpha": self.alpha,
+            "dropout": self.dropout,
+            "targets": list(self.targets),
+            "merge_init": self.merge_init,
+        }
+
+
 #: Unset path of the `sft` section (`Path("")` and `Path(".")` are equal).
 UNSET_PATH = Path(".")
 
@@ -317,6 +353,7 @@ class JoltConfig:
     optim: OptimConfig = field(default_factory=OptimConfig)
     eval: EvalConfig = field(default_factory=EvalConfig)
     sft: SftConfig = field(default_factory=SftConfig)
+    lora: LoraConfig = field(default_factory=LoraConfig)
 
     @property
     def run_dir(self) -> Path:
@@ -334,6 +371,7 @@ class JoltConfig:
             "optim": self.optim.to_dict(),
             "eval": self.eval.to_dict(),
             "sft": self.sft.to_dict(),
+            "lora": self.lora.to_dict(),
         }
 
 
@@ -345,6 +383,7 @@ _SECTIONS: dict[str, type] = {
     "optim": OptimConfig,
     "eval": EvalConfig,
     "sft": SftConfig,
+    "lora": LoraConfig,
 }
 
 
@@ -369,10 +408,11 @@ def _coerce_value(where: str, target: Any, value: Any, *, from_text: bool = Fals
     constructor: `--set optim.lr=2e-6` → `2e-06`.
     """
     if typing.get_origin(target) is list:
-        # list of paths: a single value becomes a list of one element
+        # list of paths or names: a single value becomes a list of one element
+        (item_type,) = typing.get_args(target)
         items = value if isinstance(value, list) else [value]
         if all(isinstance(item, (str, Path)) and str(item).strip() for item in items):
-            return [Path(str(item)) for item in items]
+            return [item_type(str(item)) for item in items]
     elif target is Path:
         if isinstance(value, (str, Path)):
             return Path(str(value))
@@ -574,7 +614,30 @@ def validate_config(cfg: JoltConfig) -> JoltConfig:
 
     if cfg.method == SFT_METHOD:
         _validate_sft(cfg.sft)
+    _validate_lora(cfg)
     return cfg
+
+
+def _validate_lora(cfg: JoltConfig) -> None:
+    """Invariants of the `lora` section (target names are checked against the model in `trener.lora.apply_lora`)."""
+    lora = cfg.lora
+    if not lora.enabled:
+        if lora.merge_init:
+            raise ConfigError("lora.merge_init requires lora.enabled: true")
+        return
+    if lora.r < 1:
+        raise ConfigError(f"lora.r must be ≥ 1, got {lora.r}")
+    if not math.isfinite(lora.alpha) or lora.alpha <= 0:
+        raise ConfigError(f"lora.alpha must be > 0, got {lora.alpha}")
+    if not math.isfinite(lora.dropout) or not 0 <= lora.dropout < 1:
+        raise ConfigError(f"lora.dropout must be in [0, 1), got {lora.dropout}")
+    if lora.dropout > 0 and cfg.method != SFT_METHOD:
+        raise ConfigError(
+            f"lora.dropout > 0 is allowed only for method sft: in {cfg.method!r} the own-context log-probabilities "
+            "of the training pass must equal those of the rollout snapshot"
+        )
+    if len(set(lora.targets)) != len(lora.targets):
+        raise ConfigError(f"lora.targets contains duplicates: {lora.targets}")
 
 
 def _validate_sft(sft: SftConfig) -> None:
@@ -721,6 +784,7 @@ def clone_config(cfg: JoltConfig) -> JoltConfig:
         sft=SftConfig(
             **cfg.sft.to_dict() | {"corpus": [Path(path) for path in cfg.sft.corpus], "replay": Path(cfg.sft.replay)}
         ),
+        lora=LoraConfig(**cfg.lora.to_dict()),
     )
 
 
@@ -731,6 +795,7 @@ def describe(cfg: JoltConfig) -> str:
         f"B={cfg.rollout.batch_size} G={cfg.rollout.group_size} lr={cfg.optim.lr} "
         f"beta_T={cfg.optim.beta_teacher_kl} beta_S={cfg.optim.beta_student_distill} "
         f"{_duration(cfg)} model={cfg.model.path}"
+        + (f" lora=r{cfg.lora.r}" if cfg.lora.enabled else "")
     )
 
 
@@ -759,6 +824,7 @@ __all__ = [
     "ConfigError",
     "EvalConfig",
     "JoltConfig",
+    "LoraConfig",
     "ModelConfig",
     "OptimConfig",
     "RolloutConfig",

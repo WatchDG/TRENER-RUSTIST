@@ -28,6 +28,7 @@ from .config import (
     load_config,
     resolve_eval_batch_size,
 )
+from .lora import ADAPTER_WEIGHTS
 from .schedule import resolved_steps
 
 logger = logging.getLogger("trener")
@@ -170,8 +171,11 @@ def _checkpoint_path(value: str | Path) -> Path:
         path = candidate if candidate.exists() else _resolve_path(path, REPO_ROOT)
     if path.name.endswith((".tmp", ".old")):
         raise ConfigError(f"--init-from: {path} is an unfinished write, not a checkpoint")
-    if not (path / "model.safetensors").is_file() and not (path / "master.safetensors").is_file():
-        raise ConfigError(f"--init-from: {path} has neither model.safetensors nor master.safetensors")
+    if not any((path / name).is_file() for name in ("model.safetensors", "master.safetensors", ADAPTER_WEIGHTS)):
+        raise ConfigError(
+            f"--init-from: {path} has neither model.safetensors nor master.safetensors nor a LoRA adapter "
+            f"({ADAPTER_WEIGHTS})"
+        )
     return path
 
 

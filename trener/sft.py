@@ -258,7 +258,7 @@ def run_sft(cfg: JoltConfig, *, init_from: str | Path | None = None, resume: str
                 metrics.step_time_s,
             )
             if cfg.run.checkpoint_every and metrics.step % cfg.run.checkpoint_every == 0:
-                trainer.save_checkpoint(metrics.step)
+                trainer.save_checkpoint(metrics.step, final=metrics.step == cfg.optim.steps)
                 last_saved_step = metrics.step
     except KeyboardInterrupt:
         interrupted = True
@@ -269,10 +269,11 @@ def run_sft(cfg: JoltConfig, *, init_from: str | Path | None = None, resume: str
         logger.warning("no steps were completed")
         trainer.wait_checkpoint()
     else:
-        if last_saved_step == completed:
+        if last_saved_step == completed and (completed == cfg.optim.steps or policy.lora is None):
             trainer.wait_checkpoint()  # the final step's checkpoint is already being written — no second one needed
         else:
-            trainer.save_checkpoint(completed, wait=True)
+            # not written yet, or a LoRA run stopped right after a periodic checkpoint without the merged weights
+            trainer.save_checkpoint(completed, wait=True, final=True)
         if completed != last_eval_step:
             final = _eval_step(cfg, policy, artifacts, test_docs, completed)
             if final:

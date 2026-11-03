@@ -19,8 +19,9 @@ import transformers
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from .attention import use_jolt_attention
-from .config import JoltConfig
+from .config import JoltConfig, LoraConfig
 from .fusion import fuse_model
+from .lora import LoraState, apply_lora
 from .master import merge_master, split_master_
 
 _DTYPES: dict[str, torch.dtype] = {
@@ -94,6 +95,8 @@ class Policy:
     master_low: list[torch.Tensor] = field(default_factory=list, repr=False)
     #: `split`: low halves live in pinned RAM; the optimizer step transfers them over the bus.
     master_offload: bool = False
+    #: LoRA adapters (`trener.lora`): the base is frozen, the master and the optimizer cover only the adapters.
+    lora: LoraState | None = None
 
     @property
     def n_master(self) -> int:
@@ -195,10 +198,10 @@ def _gpu_info() -> dict[str, Any]:
 def _build_master_weights(
     model: Any,
 ) -> tuple[dict[int, torch.Tensor], list[torch.nn.Parameter], list[torch.nn.Parameter], list[str]]:
-    """Creates fp32 master copies of the unique parameters (tied weights are deduplicated).
+    """Creates fp32 master copies of the unique trainable parameters (tied weights are deduplicated).
 
     Master weights are `nn.Parameter`s without a gradient from the model graph: the optimizer works on them,
-    and they are copied into the model weights after `step()`.
+    and they are copied into the model weights after `step()`. Frozen parameters (the base under LoRA) get none.
     """
     master_weights: dict[int, torch.Tensor] = {}
     master_params: list[torch.nn.Parameter] = []
@@ -206,7 +209,7 @@ def _build_master_weights(
     master_names: list[str] = []
     for name, param in model.named_parameters():
         key = id(param)
-        if key in master_weights:
+        if key in master_weights or not param.requires_grad:
             continue
         master = torch.nn.Parameter(param.detach().to(torch.float32).clone(), requires_grad=True)
         # master.grad refers to the model's bf16 gradient: a copy of the gradients in fp32 is not needed,
@@ -225,14 +228,14 @@ def _build_split_master(
     """Low halves of the master (`int16`, zeros) for the bf16 weights: master = weights + residual.
 
     The fp32 master initially equals the model weights, so the residual is zero. There are no persistent
-    fp32 tensors. `pinned=True` — residuals in pinned RAM (memory-saving mode).
+    fp32 tensors. `pinned=True` — residuals in pinned RAM (memory-saving mode). Frozen parameters get none.
     """
     master_params: list[torch.nn.Parameter] = []
     master_low: list[torch.Tensor] = []
     master_names: list[str] = []
     seen: set[int] = set()
     for name, param in model.named_parameters():
-        if id(param) in seen:
+        if id(param) in seen or not param.requires_grad:
             continue
         seen.add(id(param))
         if param.dtype != torch.bfloat16:
@@ -269,13 +272,15 @@ def build_policy(
     with_master: bool = True,
     master_storage: str = "fp32",
     master_offload: bool = False,
+    lora: LoraConfig | None = None,
 ) -> Policy:
     """Builds a `Policy` from a ready model and tokenizer.
 
     Used by both `load_policy` and the tests (a small model instead of LFM3).
     `with_master=False` — without fp32 master copies (evaluation without training).
     `master_storage="split"` — master as the bf16 model weights plus `int16` low halves (no persistent fp32
-    tensors); `master_offload` — residuals in pinned RAM.
+    tensors); `master_offload` — residuals in pinned RAM. `lora` — freeze the model and attach adapters
+    (`trener.lora.apply_lora`) before the master is built: the master covers only the adapters.
     """
     if master_storage not in ("fp32", "split"):
         raise ValueError(f"master_storage must be 'fp32' or 'split', got {master_storage!r}")
@@ -286,6 +291,7 @@ def build_policy(
             device = torch.device("cpu")
     model.to(device)
     model.config.use_cache = True
+    lora_state = apply_lora(model, lora) if lora is not None else None
     use_jolt_attention(model)  # `sdpa` → `jolt_sdpa`: same formula, faster packing and decoding
 
     split = with_master and master_storage == "split"
@@ -315,6 +321,10 @@ def build_policy(
         "model_path": str(model_path) if model_path is not None else None,
         "model_fingerprint": fingerprint,
         "n_parameters": sum(p.numel() for p in {id(p): p for p in model.parameters()}.values()),
+        "n_trainable_parameters": sum(
+            p.numel() for p in {id(p): p for p in model.parameters() if p.requires_grad}.values()
+        ),
+        "lora": lora_state.info() if lora_state is not None else None,
         "n_master_tensors": len(master_low) if split else len(master_tensors),
         "master_storage": master_storage if with_master else None,
         "master_offload": offload,
@@ -336,6 +346,7 @@ def build_policy(
         master_storage="split" if split else "fp32",
         master_low=master_low,
         master_offload=offload,
+        lora=lora_state,
     )
 
 
@@ -357,7 +368,8 @@ def load_policy(cfg: JoltConfig, *, with_master: bool = True) -> Policy:
     """Loads the tokenizer and the model, creates the master weights and the model fingerprint.
 
     `with_master=False` — without fp32 master copies (≈6.6 GB for LFM3-1.7B): they are not needed
-    for evaluating a checkpoint.
+    for evaluating a checkpoint. LoRA adapters (`lora.enabled`) are attached only for training
+    (`with_master=True`); evaluation merges a checkpoint's adapter into the weights (`load_model_weights`).
     """
     model_path = Path(cfg.model.path)
     if not model_path.exists():
@@ -384,6 +396,7 @@ def load_policy(cfg: JoltConfig, *, with_master: bool = True) -> Policy:
         with_master=with_master,
         master_storage=cfg.optim.master_storage,
         master_offload=_offload_available(cfg, device),
+        lora=cfg.lora if with_master and cfg.lora.enabled else None,
     )
     policy.set_gradient_checkpointing(cfg.model.gradient_checkpointing, selective=cfg.model.selective_checkpointing)
     if cfg.model.compile_kernels:

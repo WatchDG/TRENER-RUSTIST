@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-03
+
+### Added
+
+- Optional LoRA (`lora` config section, `trener/lora.py`, `docs/09-lora.md`): the base weights are frozen and
+  only low-rank adapters train, for every method; the fp32 master and the optimizer cover only the adapters.
+  Checkpoints hold the adapter in the PEFT format (`adapter_model.safetensors`, `adapter_config.json`) plus
+  `lora_base.json`; the final checkpoint also holds `model.safetensors` with the adapter merged, so `eval`,
+  `dist`, `make-replay` and `sequence` work unchanged. `--init-from` of a LoRA checkpoint continues its adapter
+  (`lora.merge_init: true` merges it into the base and starts a new one), `--resume` restores it; preset
+  `configs/smoke_lora_rust_keywords_jolt.yaml`.
+- `env.txt` records `n_trainable_parameters`.
+
+### Fixed
+
+- `--init-from` of a directory without `master.safetensors` (for example `dist/<name>`) with
+  `optim.master_storage: fp32` left the fp32 master at the old weights, and the first `optimizer.step()` restored
+  them; the master now follows the loaded weights.
+
 ## [0.1.0] - 2026-10-31
 
 First release.
@@ -52,5 +71,6 @@ First release.
 - Tests that need the LFM3 tokenizer are skipped when `models/LFM3-1.7B` is
   absent instead of failing.
 
-[Unreleased]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/WatchDG/TRENER-RUSTIST/releases/tag/v0.1.0

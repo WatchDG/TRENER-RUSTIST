@@ -203,7 +203,7 @@ def run_training(
         trainer.wait_checkpoint()
     else:
         # final checkpoint — synchronous; it also waits for the background write of the previous one
-        trainer.save_checkpoint(completed, wait=True)
+        trainer.save_checkpoint(completed, wait=True, final=True)
     if completed != last_eval_step:
         _run_eval(cfg, policy, artifacts, completed)
     artifacts.write_curves()

@@ -5,16 +5,17 @@ import sys
 from pathlib import Path
 
 import torch
-from safetensors.torch import load_file
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from trener.modeling import build_policy  # noqa: E402
 from trener.prompts import student_system_prompt  # noqa: E402
+from trener.trainer import load_model_weights  # noqa: E402
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("checkpoint", help="checkpoint directory with model.safetensors")
+    parser.add_argument("checkpoint", help="checkpoint directory (model.safetensors or a LoRA adapter)")
     parser.add_argument("question", help="question text (for choice, the options go on separate lines)")
     parser.add_argument("--base", default="models/LFM3-1.7B", help="source model directory (tokenizer and code)")
     parser.add_argument("--answer-type", default="text", choices=["number", "text", "choice"])
@@ -24,9 +25,10 @@ def main() -> None:
 
     tokenizer = AutoTokenizer.from_pretrained(args.base, trust_remote_code=True)
     model = AutoModelForCausalLM.from_pretrained(args.base, torch_dtype=torch.bfloat16, trust_remote_code=True)
-    model.load_state_dict(load_file(str(Path(args.checkpoint) / "model.safetensors")), strict=False)
-    model.tie_weights()
-    model.to("cuda").eval()
+    # a LoRA checkpoint without model.safetensors is rebuilt from its base and the adapter
+    policy = build_policy(model, tokenizer, model_path=Path(args.base), device=torch.device("cuda"), with_master=False)
+    load_model_weights(policy, args.checkpoint)
+    model.eval()
 
     messages = [
         {"role": "system", "content": student_system_prompt(args.answer_type)},

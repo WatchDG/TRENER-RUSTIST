@@ -48,6 +48,8 @@ ENV_KEYS = (
     "model_path",
     "model_fingerprint",
     "n_parameters",
+    "n_trainable_parameters",
+    "lora",
     "attn_implementation",
     "gpu_name",
     "gpu_total_memory_gb",
@@ -419,6 +421,7 @@ class RunArtifacts:
         optim = config.get("optim", {}) or {}
         rollout = config.get("rollout", {}) or {}
         model = config.get("model", {}) or {}
+        lora = config.get("lora", {}) or {}
         lines: list[tuple[str, str]] = [
             ("method", str(config.get("method", MISSING))),
             ("run.name", str(run.get("name", MISSING))),
@@ -431,6 +434,8 @@ class RunArtifacts:
             ("rollout.group_size", str(rollout.get("group_size", MISSING))),
             ("model.path", str(model.get("path", MISSING))),
         ]
+        if lora.get("enabled"):
+            lines.append(("lora", f"r={lora.get('r', MISSING)} alpha={lora.get('alpha', MISSING)}"))
         return lines
 
     def latest_eval_accuracy(self) -> float | None:
