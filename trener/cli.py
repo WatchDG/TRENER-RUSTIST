@@ -528,13 +528,12 @@ def cmd_data_validate(args: argparse.Namespace) -> int:
 
 def _print_prompt_lengths(args: argparse.Namespace) -> None:
     """Prompt lengths of the roles in the config model's tokens; the longest is checked against the packing budget."""
-    from transformers import AutoTokenizer
-
+    from .chat_format import load_tokenizer
     from .data import load_tasks, read_manifest
     from .prompts import build_prompts
 
     cfg = load_config(args.config)
-    tokenizer = AutoTokenizer.from_pretrained(str(cfg.model.path), trust_remote_code=cfg.model.trust_remote_code)
+    tokenizer = load_tokenizer(cfg.model.path, trust_remote_code=cfg.model.trust_remote_code)
     longest = 0
     dialog = read_manifest(args.path).get("mode", "qa") == "tutor"
     for split in read_manifest(args.path)["splits"]:
@@ -621,13 +620,12 @@ def cmd_data_make_replay(args: argparse.Namespace) -> int:
 
 def _print_corpus_plan(args: argparse.Namespace) -> None:
     """Tokens, windows and epoch size in steps for an `sft` config (the corpus comes from the argument)."""
-    from transformers import AutoTokenizer
-
+    from .chat_format import load_tokenizer
     from .corpus import SftPlan, load_corpora, tokenize_records
     from .schedule import resolve_schedule
 
     cfg = _load(args)
-    tokenizer = AutoTokenizer.from_pretrained(str(cfg.model.path), trust_remote_code=cfg.model.trust_remote_code)
+    tokenizer = load_tokenizer(cfg.model.path, trust_remote_code=cfg.model.trust_remote_code)
     max_tokens = int(cfg.sft.max_tokens)
     documents, stats = tokenize_records(load_corpora(args.path, "train"), tokenizer, max_tokens)
     loss_tokens = sum(doc.loss_tokens for doc in documents)

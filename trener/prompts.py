@@ -348,7 +348,7 @@ def build_prompts(
     ``answer_type``, :class:`ValueError` is raised.
     """
     if tokenizer is None:
-        raise ValueError("build_prompts requires a tokenizer: pass tokenizer=AutoTokenizer.from_pretrained(...)")
+        raise ValueError("build_prompts requires a tokenizer: pass tokenizer=trener.chat_format.load_tokenizer(...)")
 
     question = getattr(task, "question", None)
     if question is None:

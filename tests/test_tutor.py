@@ -157,6 +157,12 @@ def test_turn_glue_follows_the_chat_template(tokenizer: Any) -> None:
     assert tokenizer.decode(glue) == "\n<|im_start|>user\nMy answer.<|im_end|>\n<|im_start|>assistant\n<think>"
 
 
+def test_turn_glue_starts_after_the_end_of_turn_not_after_eos_of_the_checkpoint(minicpm_tokenizer: Any) -> None:
+    """MiniCPM5: the sampled turn ends with `<|im_end|>` (EOS of the pipeline), so the glue does not repeat it."""
+    glue = turn_glue_ids(minicpm_tokenizer, "My answer.")
+    assert minicpm_tokenizer.decode(glue) == "\n<|im_start|>user\nMy answer.<|im_end|>\n<|im_start|>assistant\n"
+
+
 # ---------------------------------------------------------------------- reward
 
 

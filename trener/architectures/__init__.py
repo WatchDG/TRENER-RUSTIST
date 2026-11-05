@@ -1,11 +1,11 @@
 """Model architectures: what the pipeline does differently for each of them.
 
 The architecture of a model is the `architectures` field of its `config.json` — `Lfm3ForCausalLM` (LFM3),
-`Spark2_5ForCausalLM` (Spark-X2.6) — not its name or directory. Every architecture is described in its own module
-(`trener/architectures/<architecture>.py`, `Architecture`): how its model is built — by the checkpoint's code
-(`trust_remote_code`) or by the pipeline's own implementation — and which modules of a decoder layer write into the
-residual stream. An architecture without its own module (a `transformers` Llama in the tests) gets `GENERIC`:
-`AutoModelForCausalLM` and the usual module names.
+`Spark2_5ForCausalLM` (Spark-X2.6), `LlamaForCausalLM` (MiniCPM5) — not its name or directory. Every architecture is
+described in its own module (`trener/architectures/<architecture>.py`, `Architecture`): how its model is built — by
+the checkpoint's code (`trust_remote_code`), by `transformers` or by the pipeline's own implementation — and which
+modules of a decoder layer write into the residual stream. An architecture without its own module gets `GENERIC`:
+`AutoModelForCausalLM` and the Llama module names.
 """
 
 from __future__ import annotations
@@ -15,12 +15,12 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-from . import lfm3, spark2_5
+from . import lfm3, llama, spark2_5
 from .base import GENERIC, Architecture
 
 #: Architectures with their own description, by name from `config.json`.
 ARCHITECTURES: dict[str, Architecture] = {
-    architecture.name: architecture for architecture in (lfm3.ARCHITECTURE, spark2_5.ARCHITECTURE)
+    architecture.name: architecture for architecture in (lfm3.ARCHITECTURE, llama.ARCHITECTURE, spark2_5.ARCHITECTURE)
 }
 
 
@@ -50,12 +50,18 @@ def architecture_of(model: Any) -> Architecture:
     return get_architecture(architecture_names(getattr(model, "config", None)) or type(model).__name__)
 
 
+def builds_by_remote_code(model: Any) -> bool:
+    """The model is built by the checkpoint's code (`trust_remote_code`), not by `transformers` or the pipeline."""
+    return type(model).__module__.split(".", 1)[0] == "transformers_modules"
+
+
 __all__ = [
     "ARCHITECTURES",
     "GENERIC",
     "Architecture",
     "architecture_names",
     "architecture_of",
+    "builds_by_remote_code",
     "get_architecture",
     "read_architecture",
 ]

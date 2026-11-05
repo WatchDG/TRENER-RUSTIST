@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-11-05
+
+### Added
+
+- MiniCPM5-2B (`LlamaForCausalLM`, [openbmb/MiniCPM5-2B](https://huggingface.co/openbmb/MiniCPM5-2B)): the
+  architecture module `trener/architectures/llama.py` (the model is built by `transformers`, the abliteration
+  projections are `self_attn.o_proj`, `mlp.down_proj`) and the smoke preset
+  `configs/smoke_minicpm_rust_keywords_jolt.yaml`.
+- `trener.chat_format.end_of_turn`, `align_eos`, `load_tokenizer`: the token that closes an assistant turn is read off
+  the chat template and becomes the tokenizer's EOS in memory. Every tokenizer of the pipeline (`load_policy`, `data
+  validate --config`, `data validate-corpus --config`, the epoch size of `sft`, `scripts/chat.py`) is loaded through `load_tokenizer`.
+
+### Fixed
+
+- A model whose chat template closes a turn with another token than its EOS (MiniCPM5: `<|im_end|>`, EOS `</s>`)
+  no longer generates past the end of its turn: generation stops, completions are trimmed and dialog turns are glued
+  at the end of the turn. LFM3 and Spark-X2.6 are unchanged: their EOS already closes a turn.
+- `policy.info["trust_remote_code"]` records whether the model was built by the checkpoint's code; it was true for
+  every model with a path that the pipeline does not implement itself, including `transformers` models.
+
 ## [0.7.0] - 2026-11-03
 
 ### Changed
@@ -165,7 +185,8 @@ First release.
 - Tests that need the LFM3 tokenizer are skipped when `models/LFM3-1.7B` is
   absent instead of failing.
 
-[Unreleased]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.4.1...v0.5.0

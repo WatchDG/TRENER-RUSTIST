@@ -106,6 +106,7 @@ Measure a model on GSM8K (standalone or with `--bench gsm8k` during training) an
 |---|---|---|---|
 | LFM3-1.7B | `Lfm3ForCausalLM` | [LiquidAI/LFM3-1.7B](https://huggingface.co/LiquidAI/LFM3-1.7B) | `configs/` (default path `models/LFM3-1.7B`) |
 | Spark-X2.6-1.7B | `Spark2_5ForCausalLM` | [XHToken/Spark-X2.6-1.7B](https://huggingface.co/XHToken/Spark-X2.6-1.7B) | `configs/smoke_spark_rust_keywords_jolt.yaml`; any config with `--set model.path=models/Spark-X2.6-1.7B` |
+| MiniCPM5-2B | `LlamaForCausalLM` | [openbmb/MiniCPM5-2B](https://huggingface.co/openbmb/MiniCPM5-2B) | `configs/smoke_minicpm_rust_keywords_jolt.yaml`; any config with `--set model.path=models/MiniCPM5-2B` |
 
 The standard configs expect the model in `models/LFM3-1.7B` relative to the repository root. The pipeline does not
 download it: fetch the model in advance and place it there (`snapshot_download` command in
@@ -114,7 +115,9 @@ download it: fetch the model in advance and place it there (`snapshot_download` 
 What the pipeline does differently for a model follows from its architecture — the `architectures` field of the
 model's `config.json` — and each architecture is described in its own module of `trener/architectures/`: LFM3 is
 built by the checkpoint's code (`trust_remote_code`), Spark2_5 by the pipeline's own implementation
-(`trener/architectures/spark2_5.py`; the checkpoint's code does not run in transformers 5).
+(`trener/architectures/spark2_5.py`; the checkpoint's code does not run in transformers 5), Llama (MiniCPM5) by
+`transformers`. The token that closes an assistant turn is read off the model's chat template and used as EOS
+(`trener/chat_format.py`): in MiniCPM5 it is `<|im_end|>`, not the checkpoint's `</s>`.
 
 ## Contributing
 

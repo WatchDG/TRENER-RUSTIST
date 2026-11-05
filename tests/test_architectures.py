@@ -11,12 +11,15 @@ import torch
 from trener.abliteration import find_targets
 from trener.architectures import GENERIC, architecture_of, get_architecture, read_architecture
 from trener.architectures.spark2_5 import Spark2_5Config, Spark2_5ForCausalLM
-from trener.modeling import _fingerprint
+from trener.modeling import _fingerprint, _weight_files
 
 ROOT = Path(__file__).resolve().parents[1]
 
 #: Local Spark-X2.6 checkpoint (may be absent in CI).
 SPARK_PATH = ROOT / "models" / "Spark-X2.6-1.7B"
+
+#: Local MiniCPM5-2B checkpoint (may be absent in CI).
+MINICPM_PATH = ROOT / "models" / "MiniCPM5-2B"
 
 CUDA = pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA")
 
@@ -68,7 +71,8 @@ def _model_dir(tmp_path: Path, architectures: Any) -> Path:
         (["Lfm3ForCausalLM"], "Lfm3ForCausalLM"),
         (["Spark2_5ForCausalLM"], "Spark2_5ForCausalLM"),
         (["SomethingElse", "Spark2_5ForCausalLM"], "Spark2_5ForCausalLM"),
-        (["LlamaForCausalLM"], None),
+        (["LlamaForCausalLM"], "LlamaForCausalLM"),
+        (["SomethingElse"], None),
         (None, None),
     ],
 )
@@ -78,9 +82,11 @@ def test_architecture_is_read_from_config_json(tmp_path: Path, architectures: An
 
 def test_architecture_differences() -> None:
     lfm3, spark = get_architecture("Lfm3ForCausalLM"), get_architecture("Spark2_5ForCausalLM")
+    llama = get_architecture("LlamaForCausalLM")
     assert not lfm3.native and lfm3.post_norms
     assert spark.native and spark.model_class is Spark2_5ForCausalLM and not spark.post_norms
-    assert get_architecture(None) is GENERIC and get_architecture("LlamaForCausalLM") is GENERIC
+    assert not llama.native and not llama.post_norms and llama.projections == GENERIC.projections
+    assert get_architecture(None) is GENERIC and get_architecture("SomethingElse") is GENERIC
 
 
 def test_spark_is_known_to_auto_classes() -> None:
@@ -92,11 +98,32 @@ def test_spark_is_known_to_auto_classes() -> None:
 
 
 def test_architecture_of_built_models(tiny_policy: Any, tiny_lfm3_policy: Any, tiny_spark_policy: Any) -> None:
-    assert architecture_of(tiny_policy.model) is GENERIC
+    assert architecture_of(tiny_policy.model).name == "LlamaForCausalLM"
     assert architecture_of(tiny_lfm3_policy.model).name == "Lfm3ForCausalLM"
     assert architecture_of(tiny_spark_policy.model).name == "Spark2_5ForCausalLM"
     assert tiny_spark_policy.info["architecture"] == "Spark2_5ForCausalLM"
+    # `trust_remote_code` records who built the model: only LFM3 is built by the checkpoint's code
+    assert tiny_lfm3_policy.info["trust_remote_code"] is True
     assert tiny_spark_policy.info["trust_remote_code"] is False
+    assert tiny_policy.info["trust_remote_code"] is False
+
+
+def test_llama_ablation_targets(tiny_policy: Any) -> None:
+    """Llama (MiniCPM5): the attention output and the MLP down projection of every layer, no post-norms."""
+    targets = find_targets(tiny_policy.model)
+    assert [target.name for target in targets[:2]] == ["layers.0.self_attn.o_proj", "layers.0.mlp.down_proj"]
+    assert len(targets) == 2 * tiny_policy.model.config.num_hidden_layers
+    assert all(target.gain is None for target in targets)
+
+
+def test_minicpm_checkpoint_is_llama() -> None:
+    """MiniCPM5-2B is a `transformers` Llama: no checkpoint code; its sharded weights are part of the fingerprint."""
+    if not (MINICPM_PATH / "config.json").is_file():
+        pytest.skip(f"MiniCPM5 checkpoint is unavailable: {MINICPM_PATH}")
+    architecture = read_architecture(MINICPM_PATH)
+    assert architecture.name == "LlamaForCausalLM" and not architecture.native
+    assert not list(MINICPM_PATH.glob("*.py"))
+    assert _weight_files(MINICPM_PATH) == ["model.safetensors.index.json", "model-00000-of-00001.safetensors"]
 
 
 def test_spark_ablation_targets(tiny_spark_policy: Any) -> None:
@@ -262,3 +289,45 @@ def test_spark_checkpoint_matches_the_checkpoint_code() -> None:
     with torch.no_grad():
         expected = reference(input_ids=input_ids, attention_mask=masks, use_cache=False).logits.float().cpu()
     assert torch.equal(actual, expected)
+
+
+@pytest.mark.slow
+@CUDA
+def test_minicpm_checkpoint_stops_at_the_end_of_turn() -> None:
+    """The real MiniCPM5 checkpoint (bf16, CUDA): greedy static decoding matches `generate` and stops at `<|im_end|>`.
+
+    The checkpoint's EOS is `</s>`; without `load_tokenizer` the model would run past the end of its turn.
+    """
+    if not (MINICPM_PATH / "model.safetensors.index.json").is_file():
+        pytest.skip(f"MiniCPM5 checkpoint is unavailable: {MINICPM_PATH}")
+    from trener.chat_format import NO_THINKING, load_tokenizer
+    from trener.config import RolloutConfig
+    from trener.decode import StaticDecoder
+    from trener.modeling import build_policy
+    from trener.rollout import _build_generation_config, _trim_completion
+
+    tokenizer = load_tokenizer(MINICPM_PATH)
+    model = read_architecture(MINICPM_PATH).load(
+        MINICPM_PATH, dtype=torch.bfloat16, attn_implementation="sdpa", trust_remote_code=False
+    )
+    policy = build_policy(model, tokenizer, model_path=MINICPM_PATH, device=torch.device("cuda"), with_master=False)
+    assert policy.info["architecture"] == "LlamaForCausalLM" and policy.info["trust_remote_code"] is False
+    text = tokenizer.apply_chat_template(
+        [{"role": "user", "content": "What is 17 + 25? Answer with the number only."}],
+        add_generation_prompt=True,
+        tokenize=False,
+        **NO_THINKING,
+    )
+    prompt = tokenizer(text, add_special_tokens=False)["input_ids"]
+    cfg = RolloutConfig(group_size=1, batch_size=1, max_new_tokens=32, engine="static", cuda_graphs=True)
+    static = StaticDecoder(policy, cfg).generate([prompt], max_new_tokens=32, do_sample=False, seed=0)
+    completion = _trim_completion(static.completions[0], tokenizer.eos_token_id, tokenizer.pad_token_id)
+    policy.model.eval()
+    with torch.no_grad():
+        output = policy.model.generate(
+            input_ids=torch.tensor([prompt], device="cuda"),
+            generation_config=_build_generation_config(policy, cfg, 32, False),
+        )
+    reference = _trim_completion(output[0, len(prompt) :].tolist(), tokenizer.eos_token_id, tokenizer.pad_token_id)
+    assert completion == reference
+    assert tokenizer.decode(completion) == "42<|im_end|>"

@@ -5,10 +5,10 @@ import sys
 from pathlib import Path
 
 import torch
-from transformers import AutoTokenizer
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from trener.architectures import read_architecture  # noqa: E402
+from trener.chat_format import load_tokenizer  # noqa: E402
 from trener.modeling import build_policy  # noqa: E402
 from trener.prompts import student_system_prompt  # noqa: E402
 from trener.trainer import load_model_weights  # noqa: E402
@@ -24,7 +24,8 @@ def main() -> None:
     parser.add_argument("--greedy", action="store_true", help="no sampling")
     args = parser.parse_args()
 
-    tokenizer = AutoTokenizer.from_pretrained(args.base, trust_remote_code=True)
+    # the end of an assistant turn is EOS (MiniCPM5: `<|im_end|>`, not `</s>`)
+    tokenizer = load_tokenizer(args.base, trust_remote_code=True)
     # the model is built as its architecture prescribes (`architectures` of the model's config.json)
     model = read_architecture(args.base).load(
         Path(args.base), dtype=torch.bfloat16, attn_implementation="sdpa", trust_remote_code=True

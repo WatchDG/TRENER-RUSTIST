@@ -72,7 +72,9 @@ fields depends on `kind`:
 - `qa` applies the chat template. A record with `thinking` is rendered with its reasoning
   (`<think>thinking</think>answer`, loss on both); a record without it — in the template's mode
   without reasoning (`enable_thinking=False`): the empty reasoning (`<think></think>` of LFM3,
-  `</think>` of Spark-X2.6) goes into the prompt, and the loss is on the answer only. Answers
+  `</think>` of Spark-X2.6, `<think>\n\n</think>\n\n` of MiniCPM5) goes into the prompt, and the loss
+  is on the answer only. In MiniCPM5 the generation prompt does not open the reasoning, so a record
+  with `thinking` puts `<think>` into the model's turn as well. Answers
   without reasoning teach a thinking model (LFM3) to skip the reasoning and to ignore `\boxed{}`
   from the system prompt: in a trial run (when the model's turn still began with `</think>`),
   option accuracy dropped from 0.3 to 0. Therefore the builder writes pairs as `completion` by

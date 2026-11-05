@@ -2,8 +2,9 @@
 
 The model is loaded in bf16 on CUDA as its architecture prescribes (`trener.architectures`, by `architectures` of the
 model's `config.json`): LFM3 by the checkpoint's code (`trust_remote_code=True`), Spark2_5 by the pipeline's own
-implementation. An fp32 master copy of the weights is kept alongside it, because the step `lr≈1e-6` is below the
-bf16 resolution (docs/07-usage.md §7.8).
+implementation, Llama (MiniCPM5) by `transformers`. The tokenizer is loaded with the end of an assistant turn as EOS
+(`trener.chat_format.load_tokenizer`). An fp32 master copy of the weights is kept alongside it, because the step
+`lr≈1e-6` is below the bf16 resolution (docs/07-usage.md §7.8).
 """
 
 from __future__ import annotations
@@ -19,10 +20,10 @@ from typing import Any
 
 import torch
 import transformers
-from transformers import AutoTokenizer
 
-from .architectures import architecture_names, architecture_of, read_architecture
+from .architectures import architecture_names, builds_by_remote_code, read_architecture
 from .attention import use_jolt_attention
+from .chat_format import load_tokenizer
 from .config import JoltConfig, LoraConfig
 from .fusion import fuse_model
 from .lora import LoraState, apply_lora
@@ -353,7 +354,7 @@ def build_policy(
         "master_offload": offload,
         "attn_implementation": getattr(model.config, "_attn_implementation", None),
         "architecture": (architecture_names(model.config) or [type(model).__name__])[0],
-        "trust_remote_code": model_path is not None and not architecture_of(model).native,
+        "trust_remote_code": builds_by_remote_code(model),
         **_gpu_info(),
     }
 
@@ -400,10 +401,7 @@ def load_policy(cfg: JoltConfig, *, with_master: bool = True) -> Policy:
         raise FileNotFoundError(f"model directory not found: {model_path}")
 
     dtype = _DTYPES[cfg.model.dtype]
-    tokenizer = AutoTokenizer.from_pretrained(
-        str(model_path),
-        trust_remote_code=cfg.model.trust_remote_code,
-    )
+    tokenizer = load_tokenizer(model_path, trust_remote_code=cfg.model.trust_remote_code)
     model = read_architecture(model_path).load(
         model_path,
         dtype=dtype,

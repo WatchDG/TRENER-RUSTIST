@@ -1,8 +1,9 @@
 """Description of a model architecture: what the pipeline does differently for it.
 
 An architecture is named by the `architectures` field of the model's `config.json` (`Lfm3ForCausalLM`,
-`Spark2_5ForCausalLM`). Its description holds everything that differs between architectures: how the model is
-built and which modules of a decoder layer write into the residual stream (abliteration, `trener.abliteration`).
+`Spark2_5ForCausalLM`, `LlamaForCausalLM`). Its description holds everything that differs between architectures: how
+the model is built and which modules of a decoder layer write into the residual stream (abliteration,
+`trener.abliteration`).
 """
 
 from __future__ import annotations
@@ -48,7 +49,7 @@ class Architecture:
         )
 
 
-#: Architectures without their own description (a `transformers` Llama in the tests): the usual module names.
+#: Architectures without their own description: `AutoModelForCausalLM` and the Llama module names.
 GENERIC = Architecture(
     name=None,
     projections={"operator": ("self_attn.o_proj",), "mlp": ("mlp.down_proj",)},

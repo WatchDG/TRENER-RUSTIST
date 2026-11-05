@@ -258,7 +258,8 @@ runs/<name>/
 - Evaluation: `python -m trener eval --config <config> --checkpoint runs/<name>/checkpoints/final` — accuracy on a
   task set before and after; `scripts/chat.py runs/<name>/checkpoints/final "<question>"` — a single answer.
 - Outside trener: `AutoModelForCausalLM.from_pretrained("runs/<name>/model", trust_remote_code=True)` (LFM3);
-  `Spark2_5ForCausalLM.from_pretrained("runs/<name>/model")` from `trener.architectures.spark2_5` (Spark2_5).
+  `Spark2_5ForCausalLM.from_pretrained("runs/<name>/model")` from `trener.architectures.spark2_5` (Spark2_5);
+  `AutoModelForCausalLM.from_pretrained("runs/<name>/model")` (Llama, MiniCPM5).
 
 ## 7. Restrictions
 
@@ -270,8 +271,8 @@ runs/<name>/
   wrongly. Use it for research, not for medical decisions without expert review.
 - The projections and post-norms come from the model's architecture (`trener.architectures`): LFM3 (`conv.out_proj`
   or `self_attn.o_proj`, `feed_forward.w2`, the post-norms `post_operator_norm`, `post_ffn_norm` with the γ
-  correction of §3.3), Spark2_5 (`self_attn.out_proj`, `mlp.down_proj`, no post-norm), any other — Llama-like
-  names (`self_attn.o_proj`, `mlp.down_proj`, no post-norm).
+  correction of §3.3), Spark2_5 (`self_attn.out_proj`, `mlp.down_proj`, no post-norm), Llama — MiniCPM5 — and any
+  other architecture (`self_attn.o_proj`, `mlp.down_proj`, no post-norm).
 - KL is measured on the first token of the `good` prompts only (§4.2).
 - `lora.enabled: true` is rejected; `speed` does not measure `abliterate` (time per trial is `trial_s` in
   `metrics.jsonl`).

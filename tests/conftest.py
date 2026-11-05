@@ -13,6 +13,9 @@ MODEL_PATH = Path(__file__).resolve().parents[1] / "models" / "LFM3-1.7B"
 #: Directory of the local Spark-X2.6 checkpoint (may be absent in CI).
 SPARK_PATH = Path(__file__).resolve().parents[1] / "models" / "Spark-X2.6-1.7B"
 
+#: Directory of the local MiniCPM5-2B checkpoint (may be absent in CI).
+MINICPM_PATH = Path(__file__).resolve().parents[1] / "models" / "MiniCPM5-2B"
+
 
 @pytest.fixture(scope="session")
 def project_root() -> Path:
@@ -46,10 +49,20 @@ def spark_tokenizer() -> Any:
     return AutoTokenizer.from_pretrained(str(SPARK_PATH))
 
 
-@pytest.fixture(params=["lfm3", "spark"])
+@pytest.fixture(scope="session")
+def minicpm_tokenizer() -> Any:
+    """MiniCPM5-2B tokenizer as the pipeline loads it: the end of a turn (`<|im_end|>`) is EOS, not `</s>`."""
+    from trener.chat_format import load_tokenizer
+
+    if not (MINICPM_PATH / "tokenizer_config.json").is_file():
+        pytest.skip(f"MiniCPM5 tokenizer is unavailable: {MINICPM_PATH}")
+    return load_tokenizer(MINICPM_PATH)
+
+
+@pytest.fixture(params=["lfm3", "spark", "minicpm"])
 def chat_tokenizer(request: pytest.FixtureRequest) -> Any:
-    """Tokenizers of both chat templates: LFM3 and Spark-X2.6."""
-    return request.getfixturevalue("tokenizer" if request.param == "lfm3" else "spark_tokenizer")
+    """Tokenizers of the three chat templates: LFM3, Spark-X2.6 and MiniCPM5."""
+    return request.getfixturevalue("tokenizer" if request.param == "lfm3" else f"{request.param}_tokenizer")
 
 
 @pytest.fixture(scope="session")

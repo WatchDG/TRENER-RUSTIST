@@ -114,7 +114,10 @@ def test_qa_record_follows_chat_template(tmp_path: Path, chat_tokenizer: Any, th
     assert prompt == expected
     end = thinking_end(chat_tokenizer)
     if thinking is not None:
-        assert completion.startswith(thinking + end)
+        # the turn opens the reasoning itself when the generation prompt does not (MiniCPM5: `<think>\n`)
+        reasoning, found, answer = completion.partition(end)
+        assert found and reasoning.strip().endswith(thinking) and answer.lstrip().startswith("Appends")
+        assert "Appends" not in reasoning
     else:
         assert end not in completion and completion.startswith("Appends")
     assert "Appends an element" in completion and completion.endswith(chat_tokenizer.eos_token)

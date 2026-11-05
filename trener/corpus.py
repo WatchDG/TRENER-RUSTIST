@@ -335,7 +335,8 @@ def _chat_pair(tokenizer: Any, fields: Mapping[str, str]) -> tuple[str, str]:
     """Prompt (up to the model's turn) and the model's turn for a ``qa`` record via the model's chat template.
 
     A record without ``thinking`` is rendered in the template's mode without reasoning: the empty reasoning goes
-    into the prompt (`<think></think>` of LFM3, `</think>` of Spark-X2.6), and the model's turn is the answer.
+    into the prompt (`<think></think>` of LFM3, `</think>` of Spark-X2.6, `<think>\\n\\n</think>\\n\\n` of MiniCPM5),
+    and the model's turn is the answer.
     """
     messages: list[dict[str, Any]] = []
     if fields.get("system"):

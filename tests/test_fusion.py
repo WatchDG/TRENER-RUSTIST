@@ -28,13 +28,13 @@ def _items(count: int = 4) -> list[tuple[list[int], list[int]]]:
 
 
 def _rope(policy: Any) -> Any:
-    return sys.modules[type(policy.model.model.layers[2]).__module__].apply_rotary_pos_emb
+    return sys.modules[type(policy.model.model.layers[-1]).__module__].apply_rotary_pos_emb
 
 
-@pytest.fixture(params=["lfm3", "spark"])
+@pytest.fixture(params=["lfm3", "spark", "llama"])
 def tiny(request: pytest.FixtureRequest) -> Any:
-    """Small models of the architectures with their own RMSNorm, MLP and RoPE: LFM3 and Spark2_5."""
-    return request.getfixturevalue(f"tiny_{request.param}_policy")
+    """Small models of the architectures with their own RMSNorm, MLP and RoPE: LFM3, Spark2_5, Llama (MiniCPM5)."""
+    return request.getfixturevalue(f"tiny_{request.param}_policy" if request.param != "llama" else "tiny_policy")
 
 
 def test_fuse_patches_and_is_reversible(tiny: Any) -> None:
@@ -43,7 +43,7 @@ def test_fuse_patches_and_is_reversible(tiny: Any) -> None:
     norms = sum(1 for module in model.modules() if type(module).__name__.endswith("RMSNorm"))
     rope = _rope(tiny)
     try:
-        assert sorted(fuse_model(model)) == ["mlp×6", f"rms_norm×{norms}", "rope×1"]
+        assert sorted(fuse_model(model)) == [f"mlp×{len(model.model.layers)}", f"rms_norm×{norms}", "rope×1"]
         assert _rope(tiny) is not rope
         assert fuse_model(model) == []
     finally:

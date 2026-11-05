@@ -78,11 +78,10 @@ def resolved_steps(cfg: JoltConfig) -> int:
 def _steps_per_epoch(cfg: JoltConfig) -> float:
     """Epoch size in steps: for `sft` — from the corpus plan (only the tokenizer is loaded), otherwise tasks / batch."""
     if cfg.method == SFT_METHOD:
-        from transformers import AutoTokenizer
-
+        from .chat_format import load_tokenizer
         from .sft import build_plan
 
-        tokenizer = AutoTokenizer.from_pretrained(str(cfg.model.path), trust_remote_code=cfg.model.trust_remote_code)
+        tokenizer = load_tokenizer(cfg.model.path, trust_remote_code=cfg.model.trust_remote_code)
         plan, _ = build_plan(cfg, tokenizer)
         return plan.steps_per_epoch
     from .data import load_tasks
