@@ -64,7 +64,7 @@ fields depends on `kind`:
 |---|---|---|
 | `text` | `text`, optional `title` | the whole text |
 | `completion` | `prompt`, `completion` — strings as is | only `completion` |
-| `qa` | `question`, `answer`, optional `system`, `thinking` — via the model's chat template | only the model's turn |
+| `qa` | `question`, `answer`, optional `system`, `thinking`, `images` — via the model's chat template | only the model's turn |
 
 - `completion` without a chat template is used for question–answer pairs of the form
   `Question: …\nAnswer: …` and for the replay corpus, whose prompt already contains the
@@ -79,6 +79,10 @@ fields depends on `kind`:
   from the system prompt: in a trial run (when the model's turn still began with `</think>`),
   option accuracy dropped from 0.3 to 0. Therefore the builder writes pairs as `completion` by
   default (`--qa-format plain`).
+- `qa` of a vision-language model (LFM3-VL) may carry `images`: image files given as paths relative to the
+  corpus directory, shown before the question ([12-vision.md](12-vision.md)). Their tokens count in `sft.max_tokens`,
+  and the file stamp in `corpus.json` covers the images (`images: {files, sha256}`). Example — the corpus of
+  `datasets/rust-vision/rust-code-output-0001`, preset `configs/smoke_sft_lfm3_vl.yaml`.
 
 Corpus validation — `python -m trener data validate-corpus <directory>`: record fields,
 uniqueness of `id`, and `records` and `sha256` against the manifest. The

@@ -42,6 +42,7 @@ numpy==2.3.5
 optuna==5.0.0
 packaging==26.3
 pandas==3.1.0
+pillow==12.3.0
 propcache==0.5.4
 psutil==7.2.2
 pyarrow==26.0.0
@@ -58,6 +59,8 @@ SQLAlchemy==2.1.6
 sympy==1.14.0
 tokenizers==0.23.3
 torch==2.13.0+cu130
+# torchvision: the image processor of LFM3-VL (models/LFM3-VL-2B) needs it; the wheel must match the torch build
+torchvision==0.28.0+cu130
 tqdm==4.70.1
 transformers==5.21.0
 # Triton for Windows: Triton kernels for the LFM3 convolution without gradients and torch.compile; with torch 2.13 only the 3.7 branch works

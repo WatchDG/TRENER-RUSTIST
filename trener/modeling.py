@@ -2,9 +2,12 @@
 
 The model is loaded in bf16 on CUDA as its architecture prescribes (`trener.architectures`, by `architectures` of the
 model's `config.json`): LFM3 by the checkpoint's code (`trust_remote_code=True`), Spark2_5 by the pipeline's own
-implementation, Llama (MiniCPM5) by `transformers`. The tokenizer is loaded with the end of an assistant turn as EOS
-(`trener.chat_format.load_tokenizer`). An fp32 master copy of the weights is kept alongside it, because the step
-`lr≈1e-6` is below the bf16 resolution (docs/07-usage.md §7.8).
+implementation, Llama (MiniCPM5) by `transformers`, LFM3-VL by the checkpoint's code through
+`AutoModelForImageTextToText`; a vision-language model also gets its image encoder (`trener.vision`). The tokenizer
+is loaded with the end of an assistant turn as EOS (`trener.chat_format.load_tokenizer`). `model.trainable` freezes
+the module groups that are not trained (`language`, `vision`, `projector`): they get no master weights. An fp32
+master copy of the weights is kept alongside it, because the step `lr≈1e-6` is below the bf16 resolution
+(docs/07-usage.md §7.8).
 """
 
 from __future__ import annotations
@@ -14,6 +17,7 @@ import json
 import platform
 import sys
 import warnings
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -21,13 +25,21 @@ from typing import Any
 import torch
 import transformers
 
-from .architectures import architecture_names, builds_by_remote_code, read_architecture
+from .architectures import (
+    PROJECTOR,
+    VISION,
+    architecture_names,
+    architecture_of,
+    builds_by_remote_code,
+    read_architecture,
+)
 from .attention import use_jolt_attention
 from .chat_format import load_tokenizer
 from .config import JoltConfig, LoraConfig
 from .fusion import fuse_model
 from .lora import LoraState, apply_lora
 from .master import merge_master, split_master_
+from .vision import ImageEncoder, load_image_encoder
 
 _DTYPES: dict[str, torch.dtype] = {
     "bfloat16": torch.bfloat16,
@@ -73,6 +85,10 @@ def selective_context_fn() -> Any:
 #: Files whose contents are part of the model fingerprint.
 _FINGERPRINT_FILES = ("config.json", "tokenizer_config.json", "generation_config.json")
 
+#: Files that are part of the fingerprint only when present (the processor of a vision-language model): the
+#: fingerprints of text-only models do not change.
+_OPTIONAL_FINGERPRINT_FILES = ("processor_config.json",)
+
 #: Weights file: its size and modification time are part of the fingerprint.
 _WEIGHTS_FILE = "model.safetensors"
 
@@ -105,6 +121,8 @@ class Policy:
     master_offload: bool = False
     #: LoRA adapters (`trener.lora`): the base is frozen, the master and the optimizer cover only the adapters.
     lora: LoraState | None = None
+    #: Image encoder of a vision-language model (`trener.vision`); `None` — a text-only model.
+    images: ImageEncoder | None = None
 
     @property
     def n_master(self) -> int:
@@ -140,7 +158,7 @@ class Policy:
 
     def set_use_cache(self, enabled: bool) -> None:
         """Toggles the KV cache: needed for generation, disabled during scoring/training."""
-        self.model.config.use_cache = enabled
+        _set_use_cache(self.model, enabled)
 
     def set_gradient_checkpointing(self, enabled: bool, *, selective: bool = False) -> None:
         """Enables/disables gradient checkpointing (saves activation memory).
@@ -172,6 +190,31 @@ class Policy:
         self.model.eval()
 
 
+def _set_use_cache(model: Any, enabled: bool) -> None:
+    """`use_cache` of the model config and of its text config (a vision-language model has a separate one)."""
+    model.config.use_cache = enabled
+    getter = getattr(model.config, "get_text_config", None)
+    text = getter(decoder=True) if getter is not None else None
+    if text is not None and text is not model.config:
+        text.use_cache = enabled
+
+
+def freeze_groups(model: Any, trainable: Sequence[str]) -> dict[str, int]:
+    """Freezes the parameters outside the module groups `trainable` (empty — every group trains).
+
+    Returns the number of parameters per group (tied weights counted once).
+    """
+    architecture = architecture_of(model)
+    architecture.check_groups(list(trainable), "model.trainable")
+    counts: dict[str, int] = dict.fromkeys(architecture.module_groups, 0)
+    for name, param in model.named_parameters():
+        group = architecture.group_of(name)
+        counts[group] += param.numel()
+        if trainable and group not in trainable:
+            param.requires_grad_(False)
+    return counts
+
+
 def _weight_files(model_path: Path) -> list[str]:
     """Weights files of the model: `model.safetensors`, or the index of sharded weights and its shards."""
     if (model_path / _WEIGHTS_FILE).exists() or not (model_path / _WEIGHTS_INDEX).exists():
@@ -190,6 +233,11 @@ def _fingerprint(model_path: Path) -> str:
             digest.update(path.read_bytes())
         else:
             digest.update(b"<missing>")
+    for name in _OPTIONAL_FINGERPRINT_FILES:
+        path = model_path / name
+        if path.exists():
+            digest.update(name.encode("utf-8"))
+            digest.update(path.read_bytes())
     for name in _weight_files(model_path):
         weights = model_path / name
         if weights.exists():
@@ -290,6 +338,8 @@ def build_policy(
     master_storage: str = "fp32",
     master_offload: bool = False,
     lora: LoraConfig | None = None,
+    trainable: Sequence[str] = (),
+    images: ImageEncoder | None = None,
 ) -> Policy:
     """Builds a `Policy` from a ready model and tokenizer.
 
@@ -299,7 +349,8 @@ def build_policy(
     tensors); `master_offload` — residuals in pinned RAM. `lora` — freeze the model and attach adapters
     (`trener.lora.apply_lora`) before the master is built: the master covers only the adapters. With
     `lora.quantize` (QLoRA) the linear layers are quantized on `device` before the model moves there, so their
-    bf16 weights never occupy it.
+    bf16 weights never occupy it. `trainable` — the module groups trained without LoRA (empty — all); the others
+    are frozen before the master is built. `images` — the image encoder of a vision-language model.
     """
     if master_storage not in ("fp32", "split"):
         raise ValueError(f"master_storage must be 'fp32' or 'split', got {master_storage!r}")
@@ -308,13 +359,18 @@ def build_policy(
             device = next(model.parameters()).device
         except StopIteration:  # pragma: no cover - model without parameters
             device = torch.device("cpu")
+    if lora is not None and trainable:
+        raise ValueError("model.trainable selects the groups of full fine-tuning; with LoRA use lora.modules")
+    architecture = architecture_of(model)
+    group_parameters = freeze_groups(model, () if lora is not None else trainable)
     quantized = lora is not None and lora.quantize != "none"
     lora_state = apply_lora(model, lora, device=device) if quantized else None
     model.to(device)
-    model.config.use_cache = True
+    _set_use_cache(model, True)
     if lora is not None and not quantized:
         lora_state = apply_lora(model, lora)
-    use_jolt_attention(model)  # `sdpa` → `jolt_sdpa`: same formula, faster packing and decoding
+    # `sdpa` → `jolt_sdpa`: same formula, faster packing and decoding; the vision tower keeps its own attention
+    use_jolt_attention(model, skip=architecture.prefixes((VISION,)))
 
     split = with_master and master_storage == "split"
     offload = split and bool(master_offload)
@@ -349,6 +405,10 @@ def build_policy(
             p.numel() for p in {id(p): p for p in model.parameters() if p.requires_grad}.values()
         ),
         "lora": lora_state.info() if lora_state is not None else None,
+        "group_parameters": group_parameters,
+        "trainable_groups": sorted(
+            {architecture.group_of(name) for name, param in model.named_parameters() if param.requires_grad}
+        ),
         "n_master_tensors": len(master_low) if split else len(master_tensors),
         "master_storage": master_storage if with_master else None,
         "master_offload": offload,
@@ -372,6 +432,7 @@ def build_policy(
         master_low=master_low,
         master_offload=offload,
         lora=lora_state,
+        images=images,
     )
 
 
@@ -408,6 +469,9 @@ def load_policy(cfg: JoltConfig, *, with_master: bool = True) -> Policy:
         attn_implementation=cfg.model.attn_implementation,
         trust_remote_code=cfg.model.trust_remote_code,
     )
+    images = load_image_encoder(
+        model_path, min_tokens=cfg.model.image_min_tokens, max_tokens=cfg.model.image_max_tokens
+    )
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     policy = build_policy(
         model,
@@ -419,13 +483,16 @@ def load_policy(cfg: JoltConfig, *, with_master: bool = True) -> Policy:
         master_storage=cfg.optim.master_storage,
         master_offload=_offload_available(cfg, device),
         lora=cfg.lora if with_master and cfg.lora.enabled else None,
+        trainable=cfg.model.trainable if with_master else (),
+        images=images,
     )
     policy.set_gradient_checkpointing(cfg.model.gradient_checkpointing, selective=cfg.model.selective_checkpointing)
     if cfg.model.compile_kernels:
         from torch.utils._triton import has_triton
 
         if device.type == "cuda" and has_triton():
-            policy.info["fused_kernels"] = fuse_model(policy.model)
+            skip = architecture_of(policy.model).prefixes((VISION, PROJECTOR))
+            policy.info["fused_kernels"] = fuse_model(policy.model, skip=skip)
         else:
             warnings.warn(
                 "model.compile_kernels: requires CUDA and Triton (on Windows — triton-windows) — kernel fusion skipped",
@@ -435,4 +502,4 @@ def load_policy(cfg: JoltConfig, *, with_master: bool = True) -> Policy:
     return policy
 
 
-__all__ = ["Policy", "build_policy", "load_policy"]
+__all__ = ["Policy", "build_policy", "freeze_groups", "load_policy"]

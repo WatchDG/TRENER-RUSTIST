@@ -15,6 +15,7 @@ keys), so checkpoints in the previous format load without conversion.
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 from typing import Any
 
 import torch
@@ -127,8 +128,13 @@ class FunctionalAdafactor:
         eps: tuple[float, float] = DEFAULT_EPS,
         clip_threshold: float = DEFAULT_CLIP_THRESHOLD,
         decay_rate: float = DEFAULT_DECAY_RATE,
+        lr_scales: Sequence[float] | None = None,
     ) -> None:
         self.states: list[dict[str, Any]] = [{} for _ in range(count)]
+        #: Learning rate multiplier of each parameter (the module group's `optim.*_lr_scale`).
+        self.lr_scales: list[float] = [float(scale) for scale in lr_scales] if lr_scales is not None else [1.0] * count
+        if len(self.lr_scales) != count:
+            raise ValueError(f"lr_scales has {len(self.lr_scales)} values for {count} parameters")
         self.param_groups: list[dict[str, Any]] = [
             {
                 "lr": lr,
@@ -151,7 +157,7 @@ class FunctionalAdafactor:
             param,
             grad,
             self.states[index],
-            lr=float(group["lr"]),
+            lr=float(group["lr"]) * self.lr_scales[index],
             eps=tuple(group["eps"]),
             clip_threshold=float(group["clip_threshold"]),
             decay_rate=float(group["decay_rate"]),

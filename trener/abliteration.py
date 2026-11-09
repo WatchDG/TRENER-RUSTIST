@@ -90,11 +90,9 @@ class AblationTarget:
 
 
 def decoder_layers(model: Any) -> Sequence[torch.nn.Module]:
-    """Decoder layers of a causal LM (`model.model.layers`)."""
-    layers = getattr(getattr(model, "model", model), "layers", None)
-    if layers is None:
-        raise RuntimeError(f"{type(model).__name__}: no decoder layers model.layers")
-    return layers
+    """Decoder layers of the language model (`Architecture.layers_path`: `model.layers`, in LFM3-VL
+    `model.language_model.layers`)."""
+    return architecture_of(model).decoder_layers(model)
 
 
 def _submodule(root: torch.nn.Module, path: str) -> Any:

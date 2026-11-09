@@ -7,8 +7,9 @@ The module covers three jobs:
   ``question``, ``answer``, ``reason``, ``answer_type`` (``load_tasks``,
   ``write_dataset``, ``update_manifest``, ``validate_dataset``);
 * parsing dataset records into :class:`Task`: the task condition and the verified
-  answer, plus ``reason`` (the justification for that answer). A dataset with a bad
-  record is not loaded; all errors are listed at once;
+  answer, plus ``reason`` (the justification for that answer) and, for a
+  vision-language model, ``images`` (image files of the dataset shown with the
+  question). A dataset with a bad record is not loaded; all errors are listed at once;
 * seed-reproducible batch generation of tasks: ``iter_batches``.
 
 Privileged information ``c`` is the verified answer of the task and, if present,
@@ -26,9 +27,9 @@ import os
 import random
 import re
 from collections import Counter
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -64,6 +65,9 @@ class Task:
         focus: ``tutor`` only: what exactly to ask about (visible to both roles).
         user_answer: ``tutor`` only: the user's turn between the model's turns.
         user_correct: ``tutor`` only: whether ``user_answer`` is correct.
+        images: Absolute paths of the images shown to both roles before the
+            question (the ``images`` field: paths within the dataset directory);
+            empty for a text-only task.
     """
 
     task_id: str
@@ -78,6 +82,7 @@ class Task:
     focus: str = ""
     user_answer: str = ""
     user_correct: bool | None = None
+    images: tuple[str, ...] = ()
 
 
 def epoch_progress(step: int, batch_size: int, n_tasks: int) -> float:
@@ -150,7 +155,7 @@ ANSWER_TYPES = ("number", "text", "choice", "phrase")
 DATASET_MODES = ("qa", "tutor")
 
 #: Fields of a JSONL record in ``qa`` mode; ``question`` and ``answer`` are required.
-RECORD_FIELDS = ("id", "question", "answer", "reason", "answer_type", "meta")
+RECORD_FIELDS = ("id", "question", "answer", "reason", "answer_type", "images", "meta")
 
 #: Fields of a JSONL record in ``tutor`` mode; ``topic``, ``focus``,
 #: ``user_answer``, ``user_correct`` and ``answer`` are required.
@@ -170,8 +175,11 @@ _MANIFEST_FIELDS = (
 )
 #: Split fields: a single file (``file``/``records``/``sha256``) or a ``files`` list
 #: of such file descriptions (mutually exclusive forms).
-_SPLIT_FIELDS = ("file", "files", "records", "sha256")
-_FILE_FIELDS = ("file", "records", "sha256")
+_SPLIT_FIELDS = ("file", "files", "records", "sha256", "images")
+_FILE_FIELDS = ("file", "records", "sha256", "images")
+
+#: Image file extensions accepted in the ``images`` field.
+IMAGE_SUFFIXES = (".png", ".jpg", ".jpeg", ".webp")
 
 #: Hints for common typos in record field names.
 _FIELD_HINTS = {
@@ -183,6 +191,7 @@ _FIELD_HINTS = {
     "type": "answer_type",
     "prompt": "question",
     "task_id": "id",
+    "image": "images",
     "user_reply": "user_answer",
     "correct": "user_correct",
 }
@@ -207,10 +216,13 @@ class DatasetSummary:
     mode: str = "qa"
     #: ``tutor`` only: number of records with a correct (``correct``) and an incorrect (``incorrect``) user answer.
     user_verdicts: dict[str, Counter[str]] = field(default_factory=dict)
-    #: Questions that occur in both the training and the held-out split.
+    #: Questions (with their images) that occur in both the training and the held-out split.
     overlap: dict[tuple[str, str], int] = field(default_factory=dict)
     #: Splits whose manifest entry has no ``records``/``sha256``.
     unsealed: list[str] = field(default_factory=list)
+    #: Tasks with images and the distinct image files, by split.
+    with_images: dict[str, int] = field(default_factory=dict)
+    image_files: dict[str, int] = field(default_factory=dict)
 
 
 def _sha256(path: Path) -> str:
@@ -309,6 +321,16 @@ def _check_file_entry(path: Path, label: str, entry: dict[str, Any]) -> None:
         raise DataError(f"{path}: {label}.records must be an integer")
     if "sha256" in entry and not (isinstance(entry["sha256"], str) and re.fullmatch(r"[0-9a-f]{64}", entry["sha256"])):
         raise DataError(f"{path}: {label}.sha256 must be 64 hexadecimal characters")
+    if "images" in entry:
+        images = entry["images"]
+        if (
+            not isinstance(images, dict)
+            or set(images) != {"files", "sha256"}
+            or isinstance(images["files"], bool)
+            or not isinstance(images["files"], int)
+            or not (isinstance(images["sha256"], str) and re.fullmatch(r"[0-9a-f]{64}", images["sha256"]))
+        ):
+            raise DataError(f"{path}: {label}.images must be {{files: <count>, sha256: <64 hexadecimal characters>}}")
 
 
 def split_files(entry: dict[str, Any]) -> list[dict[str, Any]]:
@@ -338,6 +360,34 @@ def _check_fields(record: Any, allowed: Sequence[str]) -> None:
         hints = [f"{name} → {_FIELD_HINTS[name]}" for name in unknown if name in _FIELD_HINTS]
         hint = f" (the field is called: {', '.join(hints)})" if hints else ""
         raise ValueError(f"unknown fields {unknown}{hint}; allowed: {list(allowed)}")
+
+
+def parse_image_paths(value: Any, root: Path | None) -> tuple[str, ...]:
+    """The ``images`` field: relative paths within the directory ``root`` → absolute paths of existing files.
+
+    The same field is used by task records (the dataset directory) and corpus records (the corpus directory).
+    """
+    if value is None:
+        return ()
+    if not isinstance(value, list) or not value or not all(isinstance(item, str) and item.strip() for item in value):
+        raise ValueError("field images must be a non-empty list of image paths within the dataset directory")
+    resolved: list[str] = []
+    for item in value:
+        relative = PurePosixPath(item)
+        if "\\" in item or relative.is_absolute() or PureWindowsPath(item).drive or ".." in relative.parts:
+            raise ValueError(
+                f"images: {item!r} must be a relative path with / inside the dataset directory, without .."
+            )
+        if relative.suffix.lower() not in IMAGE_SUFFIXES:
+            raise ValueError(f"images: {item!r} is not an image file; allowed: {list(IMAGE_SUFFIXES)}")
+        if root is None:
+            resolved.append(item)
+            continue
+        path = (root / relative).resolve()
+        if not path.is_file():
+            raise ValueError(f"images: file {item!r} not found in {root}")
+        resolved.append(str(path))
+    return tuple(resolved)
 
 
 def _record_id(record: dict[str, Any], split: str, index: int) -> str:
@@ -390,8 +440,13 @@ def _parse_tutor_record(record: Any, split: str, index: int) -> Task:
     )
 
 
-def _parse_task_record(record: Any, split: str, index: int, default_type: str, mode: str = "qa") -> Task:
-    """Parses one JSONL record into a :class:`Task`; on error raises ``ValueError`` with the reason."""
+def _parse_task_record(
+    record: Any, split: str, index: int, default_type: str, mode: str = "qa", root: Path | None = None
+) -> Task:
+    """Parses one JSONL record into a :class:`Task`; on error raises ``ValueError`` with the reason.
+
+    ``root`` is the dataset directory: the paths of ``images`` are resolved against it.
+    """
     if mode == "tutor":
         return _parse_tutor_record(record, split, index)
     _check_fields(record, RECORD_FIELDS)
@@ -432,6 +487,7 @@ def _parse_task_record(record: Any, split: str, index: int, default_type: str, m
     task_id = _record_id(record, split, index)
     if "meta" in record and not isinstance(record["meta"], dict):
         raise ValueError("field meta must be an object")
+    images = parse_image_paths(record.get("images"), root)
 
     return Task(
         task_id=task_id,
@@ -441,6 +497,7 @@ def _parse_task_record(record: Any, split: str, index: int, default_type: str, m
         privileged_type=PRIVILEGED_TYPE_REFERENCE_ANSWER,
         reason=reason.strip(),
         answer_type=answer_type,
+        images=images,
     )
 
 
@@ -472,7 +529,7 @@ def _read_files(paths: Sequence[Path], split: str, default_type: str, mode: str 
                     errors.append(f"{place}: invalid JSON ({exc.msg})")
                     continue
                 try:
-                    task = _parse_task_record(record, split, record_index, default_type, mode)
+                    task = _parse_task_record(record, split, record_index, default_type, mode, path.parent)
                 except ValueError as exc:
                     errors.append(f"{place}: {exc}")
                     continue
@@ -527,15 +584,60 @@ def load_tasks(dataset_dir: str | Path, split: str, *, check_seal: bool = True) 
             )
     tasks, counts = _read_files(paths, split, manifest.get("default_answer_type", "number"), manifest.get("mode", "qa"))
     if check_seal:
+        start = 0
         for path, item, count in zip(paths, entries, counts, strict=True):
             if "records" in item and item["records"] != count:
                 raise DataError(f"{path}: {count} records, but the manifest says {item['records']}")
+            seal = images_seal(directory, tasks[start : start + count])
+            start += count
+            if "images" in item and item["images"] != seal:
+                raise DataError(
+                    f"{path}: the images of the records do not match the manifest — they were changed after the "
+                    f"manifest was written; check them and update the manifest: "
+                    f"`python -m trener data validate {directory} --update-manifest`"
+                )
     logger.info("dataset %s[%s]: loaded %d tasks", manifest["name"], split, len(tasks))
     return tasks
 
 
-def task_record(task: Task) -> dict[str, Any]:
-    """JSONL record of a task (the inverse of parsing in ``load_tasks``)."""
+def images_seal(directory: str | Path, tasks: Sequence[Task]) -> dict[str, Any] | None:
+    """Stamp of the images of ``tasks`` (``None`` — the tasks have no images), see :func:`image_files_seal`."""
+    return image_files_seal(directory, (path for task in tasks for path in task.images))
+
+
+def image_files_seal(directory: str | Path, paths: Iterable[str]) -> dict[str, Any] | None:
+    """Stamp of image files: the number of distinct files and the ``sha256`` of their paths relative to
+    ``directory`` and of their contents (``None`` — no files)."""
+    root = Path(directory).resolve()
+    files = sorted(set(paths))
+    if not files:
+        return None
+    digest = hashlib.sha256()
+    for path in files:
+        relative = Path(path).relative_to(root).as_posix()
+        digest.update(f"{relative}\t{_sha256(Path(path))}\n".encode())
+    return {"files": len(files), "sha256": digest.hexdigest()}
+
+
+def _relative_images(task: Task, root: Path | None) -> list[str]:
+    """``images`` of a record: paths relative to the dataset directory ``root`` (as stored, without it)."""
+    if root is None:
+        return list(task.images)
+    base = root.resolve()
+    relative = []
+    for path in task.images:
+        try:
+            relative.append(Path(path).resolve().relative_to(base).as_posix())
+        except ValueError as exc:
+            raise DataError(f"task {task.task_id}: image {path} lies outside the dataset directory {base}") from exc
+    return relative
+
+
+def task_record(task: Task, root: str | Path | None = None) -> dict[str, Any]:
+    """JSONL record of a task (the inverse of parsing in ``load_tasks``).
+
+    ``root`` is the dataset directory: ``images`` are written relative to it.
+    """
     if task.mode == "tutor":
         return {
             "id": task.task_id,
@@ -546,13 +648,16 @@ def task_record(task: Task) -> dict[str, Any]:
             "answer": task.gold_answer,
             "reason": task.reason,
         }
-    return {
+    record: dict[str, Any] = {
         "id": task.task_id,
         "question": task.question,
         "answer": task.gold_answer,
         "reason": task.reason,
         "answer_type": task.answer_type,
     }
+    if task.images:
+        record["images"] = _relative_images(task, Path(root) if root is not None else None)
+    return record
 
 
 def _write_text_atomic(path: Path, text: str) -> None:
@@ -589,9 +694,12 @@ def write_dataset(
     entries: dict[str, dict[str, Any]] = {}
     for split, tasks in splits.items():
         path = directory / f"{split}.jsonl"
-        lines = [json.dumps(task_record(task), ensure_ascii=False) + "\n" for task in tasks]
+        lines = [json.dumps(task_record(task, directory), ensure_ascii=False) + "\n" for task in tasks]
         _write_text_atomic(path, "".join(lines))
         entries[split] = {"file": path.name, "records": len(lines), "sha256": _sha256(path)}
+        seal = images_seal(directory, tasks)
+        if seal is not None:
+            entries[split]["images"] = seal
     manifest: dict[str, Any] = {
         "format": DATASET_FORMAT,
         "format_version": DATASET_FORMAT_VERSION,
@@ -638,10 +746,19 @@ def update_manifest(dataset_dir: str | Path, *, name: str | None = None) -> dict
     for split, split_entry in manifest["splits"].items():
         entries = split_files(split_entry)
         paths = [directory / item["file"] for item in entries]
-        _, counts = _read_files(paths, split, manifest.get("default_answer_type", "number"), manifest.get("mode", "qa"))
+        tasks, counts = _read_files(
+            paths, split, manifest.get("default_answer_type", "number"), manifest.get("mode", "qa")
+        )
+        start = 0
         for path, item, count in zip(paths, entries, counts, strict=True):
             item["records"] = count
             item["sha256"] = _sha256(path)
+            seal = images_seal(directory, tasks[start : start + count])
+            start += count
+            if seal is None:
+                item.pop("images", None)
+            else:
+                item["images"] = seal
     _write_manifest(directory, manifest)
     return manifest
 
@@ -661,6 +778,8 @@ def validate_dataset(dataset_dir: str | Path) -> DatasetSummary:
         },
         max_reason_chars={split: max((len(t.reason) for t in tasks), default=0) for split, tasks in by_split.items()},
         mode=manifest.get("mode", "qa"),
+        with_images={split: sum(1 for task in tasks if task.images) for split, tasks in by_split.items()},
+        image_files={split: len({path for task in tasks for path in task.images}) for split, tasks in by_split.items()},
         unsealed=[
             split
             for split, entry in manifest["splits"].items()
@@ -672,7 +791,8 @@ def validate_dataset(dataset_dir: str | Path) -> DatasetSummary:
             split: Counter("correct" if task.user_correct else "incorrect" for task in tasks)
             for split, tasks in by_split.items()
         }
-    questions = {split: {task.question for task in tasks} for split, tasks in by_split.items()}
+    # a task with images is the question together with its images: the same question about another image differs
+    questions = {split: {(task.question, task.images) for task in tasks} for split, tasks in by_split.items()}
     names = sorted(by_split)
     for position, first in enumerate(names):
         for second in names[position + 1 :]:
@@ -693,9 +813,18 @@ def dataset_fingerprint(dataset_dir: str | Path) -> dict[str, Any]:
     }
 
 
+def _file_seal(item: dict[str, Any]) -> str | None:
+    """Seal of one split file: its ``sha256``, combined with the stamp of its images when it has any."""
+    seal = item.get("sha256")
+    images = item.get("images")
+    if seal is None or images is None:
+        return seal
+    return hashlib.sha256(f"{seal}\n{images['sha256']}".encode("ascii")).hexdigest()
+
+
 def _split_seal(entry: dict[str, Any]) -> str | None:
     """``sha256`` of a split: for one file, its seal; for several, the hash of the seals in file order."""
-    seals = [item.get("sha256") for item in split_files(entry)]
+    seals = [_file_seal(item) for item in split_files(entry)]
     if "files" not in entry:
         return seals[0]
     if any(seal is None for seal in seals):
@@ -708,6 +837,7 @@ __all__ = [
     "DATASET_FORMAT",
     "DATASET_FORMAT_VERSION",
     "DATASET_MODES",
+    "IMAGE_SUFFIXES",
     "MANIFEST_FILE",
     "PRIVILEGED_TYPE_REFERENCE_ANSWER",
     "RECORD_FIELDS",
@@ -717,8 +847,11 @@ __all__ = [
     "Task",
     "dataset_fingerprint",
     "epoch_progress",
+    "image_files_seal",
+    "images_seal",
     "iter_batches",
     "load_tasks",
+    "parse_image_paths",
     "read_manifest",
     "split_files",
     "task_record",

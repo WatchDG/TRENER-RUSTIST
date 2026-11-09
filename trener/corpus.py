@@ -6,8 +6,9 @@ for the splits. A record is one document about one item (``item``, for example
 
 * ``text`` — raw text (``text``, optional ``title``): loss on the whole text;
 * ``qa`` — a question and an answer in the model's chat template (``question``, ``answer``,
-  optional ``system`` and ``thinking``): loss only on the model's turn; a record without ``thinking`` is
-  rendered in the template's mode without reasoning (`trener.chat_format.NO_THINKING`);
+  optional ``system``, ``thinking`` and ``images``): loss only on the model's turn; a record without ``thinking`` is
+  rendered in the template's mode without reasoning (`trener.chat_format.NO_THINKING`); ``images`` — image files
+  of the corpus directory shown before the question (a vision-language model, `trener.vision`);
 * ``completion`` — prompt and response strings as they are, without the chat template (``prompt``,
   ``completion``): loss on the response. This is how plain-text "Question/Answer" pairs
   and repetitions of the model's own answers are written (a prompt with the template
@@ -41,7 +42,8 @@ from typing import Any
 import numpy as np
 
 from .chat_format import NO_THINKING
-from .data import DataError
+from .data import DataError, image_files_seal, parse_image_paths
+from .vision import ImageEncoder, Images, expand_image_tokens, image_message
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +61,8 @@ _KIND_FIELDS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
     "completion": (("prompt", "completion"), ()),
 }
 _COMMON_FIELDS = ("id", "item", "kind", "meta")
+#: Kinds whose records may carry ``images`` (a list of paths, not a string field).
+_IMAGE_KINDS = ("qa",)
 _MANIFEST_FIELDS = ("format", "format_version", "name", "description", "source", "splits")
 
 #: How many tokens of the previous window the next window of a long text receives as context (without loss).
@@ -73,6 +77,8 @@ class CorpusRecord:
     item: str
     kind: str
     fields: Mapping[str, str]
+    #: Absolute paths of the record's images (``qa`` only); empty — a text-only record.
+    images: tuple[str, ...] = ()
 
 
 @dataclass
@@ -83,6 +89,8 @@ class Document:
     item: str
     prompt: np.ndarray
     completion: np.ndarray
+    #: Images of the prompt (their tokens are already expanded in `prompt`); `None` — a text-only document.
+    images: Images | None = None
 
     @property
     def length(self) -> int:
@@ -168,14 +176,16 @@ def corpus_splits(corpus_dir: str | Path) -> list[str]:
     return list(read_corpus_manifest(corpus_dir)["splits"])
 
 
-def _parse_record(raw: Any, where: str) -> CorpusRecord:
+def _parse_record(raw: Any, where: str, root: Path | None = None) -> CorpusRecord:
+    """One corpus record; ``root`` is the corpus directory (``images`` are resolved against it)."""
     if not isinstance(raw, dict):
         raise DataError(f"{where}: the record must be a JSON object")
     kind = raw.get("kind")
     if kind not in KINDS:
         raise DataError(f"{where}: kind={kind!r}; allowed: {list(KINDS)}")
     required, optional = _KIND_FIELDS[kind]
-    unknown = sorted(set(raw) - set(_COMMON_FIELDS) - set(required) - set(optional))
+    extra = ("images",) if kind in _IMAGE_KINDS else ()
+    unknown = sorted(set(raw) - set(_COMMON_FIELDS) - set(required) - set(optional) - set(extra))
     if unknown:
         raise DataError(f"{where}: unknown fields {unknown} for kind={kind!r}")
     for key in ("id", "item", *required):
@@ -185,7 +195,11 @@ def _parse_record(raw: Any, where: str) -> CorpusRecord:
         if key in raw and not isinstance(raw[key], str):
             raise DataError(f"{where}: field {key} must be a string")
     values = {key: raw[key] for key in (*required, *optional) if key in raw}
-    return CorpusRecord(record_id=raw["id"], item=raw["item"], kind=kind, fields=values)
+    try:
+        images = parse_image_paths(raw.get("images"), root)
+    except ValueError as exc:
+        raise DataError(f"{where}: {exc}") from exc
+    return CorpusRecord(record_id=raw["id"], item=raw["item"], kind=kind, fields=values, images=images)
 
 
 def load_corpus(corpus_dir: str | Path, split: str, *, check_seal: bool = True) -> list[CorpusRecord]:
@@ -206,6 +220,7 @@ def load_corpus(corpus_dir: str | Path, split: str, *, check_seal: bool = True) 
                 f"{path}: sha256 does not match the manifest — `trener data validate-corpus --update-manifest`"
             )
         count = 0
+        image_paths: list[str] = []
         with path.open(encoding="utf-8") as stream:
             for number, line in enumerate(stream, start=1):
                 if not line.strip():
@@ -215,14 +230,20 @@ def load_corpus(corpus_dir: str | Path, split: str, *, check_seal: bool = True) 
                     raw = json.loads(line)
                 except json.JSONDecodeError as exc:
                     raise DataError(f"{where}: invalid JSON ({exc})") from exc
-                record = _parse_record(raw, where)
+                record = _parse_record(raw, where, directory)
                 if record.record_id in seen:
                     raise DataError(f"{where}: duplicate id {record.record_id!r}")
                 seen.add(record.record_id)
                 records.append(record)
+                image_paths.extend(record.images)
                 count += 1
         if check_seal and "records" in item and item["records"] != count:
             raise DataError(f"{path}: {count} records, but the manifest says {item['records']}")
+        if check_seal and "images" in item and item["images"] != image_files_seal(directory, image_paths):
+            raise DataError(
+                f"{path}: the images of the records do not match the manifest — "
+                "`trener data validate-corpus --update-manifest`"
+            )
     return records
 
 
@@ -244,9 +265,17 @@ def load_corpora(corpus_dirs: Sequence[str | Path], split: str, *, missing_ok: b
     return records
 
 
-def record_json(record: CorpusRecord, meta: Mapping[str, Any] | None = None) -> dict[str, Any]:
-    """Corpus record as a JSON object (field order: id, item, kind, the fields of the kind, meta)."""
+def record_json(
+    record: CorpusRecord, meta: Mapping[str, Any] | None = None, root: str | Path | None = None
+) -> dict[str, Any]:
+    """Corpus record as a JSON object (field order: id, item, kind, the fields of the kind, images, meta).
+
+    ``root`` is the corpus directory: ``images`` are written relative to it.
+    """
     payload: dict[str, Any] = {"id": record.record_id, "item": record.item, "kind": record.kind, **record.fields}
+    if record.images:
+        base = Path(root).resolve() if root is not None else None
+        payload["images"] = [Path(path).relative_to(base).as_posix() if base else path for path in record.images]
     if meta:
         payload["meta"] = dict(meta)
     return payload
@@ -273,11 +302,13 @@ def write_corpus(
     for split, files in splits.items():
         items = []
         for file_name, rows in files.items():
-            for position, row in enumerate(rows):
-                _parse_record(row, f"{file_name}[{position}]")
+            parsed = [_parse_record(row, f"{file_name}[{position}]", directory) for position, row in enumerate(rows)]
             path = directory / file_name
             _write_text_atomic(path, "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows))
             items.append({"file": file_name, "records": len(rows), "sha256": _sha256(path)})
+            seal = image_files_seal(directory, (image for record in parsed for image in record.images))
+            if seal is not None:
+                items[-1]["images"] = seal
         entries[split] = {"files": items}
     manifest = {
         "format": CORPUS_FORMAT,
@@ -301,8 +332,19 @@ def update_corpus_manifest(corpus_dir: str | Path) -> dict[str, Any]:
             if not path.is_file():
                 raise DataError(f"file not found: {path}")
             with path.open(encoding="utf-8") as stream:
-                item["records"] = sum(1 for line in stream if line.strip())
+                lines = [line for line in stream if line.strip()]
+            item["records"] = len(lines)
             item["sha256"] = _sha256(path)
+            images = [
+                image
+                for number, line in enumerate(lines, start=1)
+                for image in _parse_record(json.loads(line), f"{path}:{number}", directory).images
+            ]
+            seal = image_files_seal(directory, images)
+            if seal is None:
+                item.pop("images", None)
+            else:
+                item["images"] = seal
     _write_text_atomic(directory / CORPUS_MANIFEST, json.dumps(manifest, ensure_ascii=False, indent=2) + "\n")
     load_corpus(directory, "train")
     return manifest
@@ -314,10 +356,17 @@ def corpus_fingerprint(corpus_dir: str | Path) -> dict[str, Any]:
     return {
         "name": manifest["name"],
         "path": str(corpus_dir),
-        "splits": {
-            split: [item.get("sha256") for item in entry["files"]] for split, entry in manifest["splits"].items()
-        },
+        "splits": {split: [_file_seal(item) for item in entry["files"]] for split, entry in manifest["splits"].items()},
     }
+
+
+def _file_seal(item: Mapping[str, Any]) -> str | None:
+    """Seal of a corpus file: its ``sha256``, combined with the stamp of its images when it has any."""
+    seal = item.get("sha256")
+    images = item.get("images")
+    if seal is None or not isinstance(images, Mapping):
+        return seal
+    return hashlib.sha256(f"{seal}\n{images.get('sha256')}".encode("ascii")).hexdigest()
 
 
 # ------------------------------------------------------------- tokenization
@@ -331,7 +380,7 @@ def _array(tokens: Sequence[int]) -> np.ndarray:
     return np.asarray(tokens, dtype=np.int32)
 
 
-def _chat_pair(tokenizer: Any, fields: Mapping[str, str]) -> tuple[str, str]:
+def _chat_pair(tokenizer: Any, fields: Mapping[str, str], n_images: int = 0) -> tuple[str, str]:
     """Prompt (up to the model's turn) and the model's turn for a ``qa`` record via the model's chat template.
 
     A record without ``thinking`` is rendered in the template's mode without reasoning: the empty reasoning goes
@@ -341,7 +390,7 @@ def _chat_pair(tokenizer: Any, fields: Mapping[str, str]) -> tuple[str, str]:
     messages: list[dict[str, Any]] = []
     if fields.get("system"):
         messages.append({"role": "system", "content": fields["system"]})
-    messages.append({"role": "user", "content": fields["question"]})
+    messages.append({"role": "user", "content": image_message(fields["question"], n_images)})
     answer: dict[str, Any] = {"role": "assistant", "content": fields["answer"]}
     options: dict[str, Any] = {}
     if "thinking" in fields:
@@ -382,9 +431,13 @@ def _text_windows(
 
 
 def tokenize_records(
-    records: Iterable[CorpusRecord], tokenizer: Any, max_tokens: int
+    records: Iterable[CorpusRecord], tokenizer: Any, max_tokens: int, images: ImageEncoder | None = None
 ) -> tuple[list[Document], TokenizeStats]:
-    """Corpus documents: texts are split into windows; ``qa``/``completion`` records longer than a row are dropped."""
+    """Corpus documents: texts are split into windows; ``qa``/``completion`` records longer than a row are dropped.
+
+    ``images`` is the image encoder of a vision-language model: a ``qa`` record with images gets their tokens in the
+    prompt (`trener.vision.expand_image_tokens`). Without it a record with images is an error.
+    """
     stats = TokenizeStats()
     documents: list[Document] = []
     bos = getattr(tokenizer, "bos_token_id", None)
@@ -403,18 +456,27 @@ def tokenize_records(
                 stats.windowed_records += 1
             documents.extend(pieces)
             continue
+        pictures: Images | None = None
+        if record.images:
+            if images is None:
+                raise DataError(
+                    f"{record.record_id}: the record has images, but the model has no vision tower (model.path)"
+                )
+            pictures = images.describe(record.images)
         if record.kind == "qa":
-            prompt_text, completion_text = _chat_pair(tokenizer, record.fields)
+            prompt_text, completion_text = _chat_pair(tokenizer, record.fields, len(record.images))
         else:
             prompt_text, completion_text = record.fields["prompt"], record.fields["completion"]
         prompt = _encode(tokenizer, prompt_text)
+        if pictures is not None and images is not None:
+            prompt = expand_image_tokens(prompt, pictures, images.image_token_id)
         if record.kind == "completion" and prefix and prompt[:1] != prefix:
             prompt = [*prefix, *prompt]  # a ready chat prompt already starts with BOS, plain text does not
         completion = _encode(tokenizer, completion_text)
         if not prompt or not completion or len(prompt) + len(completion) > max_tokens:
             stats.dropped.append(record.record_id)
             continue
-        documents.append(Document(record.record_id, record.item, _array(prompt), _array(completion)))
+        documents.append(Document(record.record_id, record.item, _array(prompt), _array(completion), pictures))
     stats.documents = len(documents)
     if stats.dropped:
         logger.warning(

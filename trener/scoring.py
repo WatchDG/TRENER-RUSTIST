@@ -18,6 +18,12 @@ Packing (`max_tokens > 0`): sequences of one group are concatenated into rows wi
 padding; `position_ids` restart from 0 for each sequence, so attention and the LFM3
 convolution window do not cross document boundaries. The unpacked path (`max_tokens = 0`)
 remains the reference.
+
+Images (a vision-language model, `trener.vision`): a sequence may carry the images of its
+prompt. A row with images enters the language model as `inputs_embeds` — the token embeddings
+with the image features in place of the `<|image|>` tokens; each distinct image of the row
+goes through the vision tower once, with gradient when the vision tower or the projector is
+trained. Rows without images keep the `input_ids` path.
 """
 
 from __future__ import annotations
@@ -30,6 +36,7 @@ import torch
 from torch.utils.checkpoint import checkpoint
 
 from .attention import DOCUMENTS_KWARG
+from .vision import Images, has_images, multimodal_embeds
 
 if TYPE_CHECKING:  # pragma: no cover - for type checking only
     from .config import RolloutConfig
@@ -183,6 +190,15 @@ class StreamPacker:
         return rows
 
 
+def _model_inputs(policy: Policy, input_ids: torch.Tensor, images: Sequence[Images | None]) -> dict[str, Any]:
+    """Inputs of the base model: `input_ids`, or `inputs_embeds` with image features when the rows carry images."""
+    if not has_images(images):
+        return {"input_ids": input_ids}
+    if policy.images is None:
+        raise ValueError("the sequences carry images, but the model has no image encoder (a vision-language model)")
+    return {"inputs_embeds": multimodal_embeds(policy.model, policy.images, input_ids, images)}
+
+
 def _kept_positions(completion: Sequence[int], mask: Sequence[bool] | None) -> list[int]:
     """Completion positions for which logp is computed: all, or only those with `True` in the mask."""
     if mask is None:
@@ -200,6 +216,7 @@ def score_sequences(
     groups: Sequence[Any] | None = None,
     stats: dict[str, Any] | None = None,
     masks: Sequence[Sequence[bool] | None] | None = None,
+    images: Sequence[Images | None] | None = None,
 ) -> list[torch.Tensor]:
     """Computes the log-probabilities of completion tokens for a set of (prompt, completion) pairs.
 
@@ -219,6 +236,8 @@ def score_sequences(
 
     `stats` (optional) accumulates `real_tokens` — the tokens of the sequences — and
     `batch_tokens` — the tokens that went through the model (with padding).
+
+    `images` (optional) is one entry per sequence: the images of its prompt (`None` — none).
     """
     if not items:
         return []
@@ -230,8 +249,11 @@ def score_sequences(
         for (_, completion), mask in zip(items, masks, strict=True):
             if mask is not None and len(mask) != len(completion):
                 raise ValueError(f"mask length ({len(mask)}) does not match completion length ({len(completion)})")
+    if images is not None and len(images) != len(items):
+        raise ValueError(f"number of image entries ({len(images)}) must match the number of sequences ({len(items)})")
+    pictures: Sequence[Images | None] = images if images is not None else [None] * len(items)
     if max_tokens > 0:
-        return _score_packed(policy, items, grad, int(max_tokens), groups, stats, masks)
+        return _score_packed(policy, items, grad, int(max_tokens), groups, stats, masks, pictures)
 
     device = policy.device
     lm_head = policy.model.lm_head
@@ -277,7 +299,8 @@ def score_sequences(
         # fp32 logits over the whole vocabulary.
         context = torch.enable_grad() if grad else torch.no_grad()
         with context:
-            outputs = base(input_ids=input_ids, attention_mask=attention_mask, use_cache=False)
+            inputs = _model_inputs(policy, input_ids, [pictures[index] for index in indices])
+            outputs = base(**inputs, attention_mask=attention_mask, use_cache=False)
             hidden_states = outputs.last_hidden_state
             if target_ids:
                 row_index = torch.tensor(rows, dtype=torch.long, device=device)
@@ -302,6 +325,7 @@ def _score_packed(
     groups: Sequence[Any] | None,
     stats: dict[str, Any] | None,
     masks: Sequence[Sequence[bool] | None] | None = None,
+    images: Sequence[Images | None] | None = None,
 ) -> list[torch.Tensor]:
     """Packed scoring: one forward pass over one row of sequences from a single group."""
     device = policy.device
@@ -344,7 +368,9 @@ def _score_packed(
         with context:
             # no `attention_mask`: restarting `position_ids` isolates the documents of the row;
             # document lengths are for per-document attention (`trener.attention`)
-            outputs = base(input_ids=input_ids, position_ids=positions, use_cache=False, **{DOCUMENTS_KWARG: documents})
+            row_images = [images[index] for index in members] if images is not None else []
+            inputs = _model_inputs(policy, input_ids, row_images)
+            outputs = base(**inputs, position_ids=positions, use_cache=False, **{DOCUMENTS_KWARG: documents})
             hidden_states = outputs.last_hidden_state[0]
             if target_ids:
                 column_index = torch.tensor(columns, dtype=torch.long, device=device)
@@ -387,7 +413,7 @@ def score_role_pair(
     cfg: RolloutConfig | None = None,
     grad: bool = False,
 ) -> list[torch.Tensor]:
-    """Scores the tokens of one role in a foreign context.
+    """Scores the tokens of one role in a foreign context (with the trajectories' images).
 
     `other_prompt_ids` holds one prompt per trajectory, in the same order as
     `trajectories` (the context in which the role's tokens are scored).
@@ -401,7 +427,8 @@ def score_role_pair(
         (list(other_prompt_ids[index]), list(trajectory.completion_ids))
         for index, trajectory in enumerate(trajectories)
     ]
-    return score_sequences(policy, items, micro_batch_size=micro, grad=grad)
+    images = [trajectory.images for trajectory in trajectories]
+    return score_sequences(policy, items, micro_batch_size=micro, grad=grad, images=images)
 
 
 def deltas(

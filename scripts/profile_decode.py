@@ -58,7 +58,7 @@ def main() -> int:
     policy = load_policy(cfg, with_master=False)
     decoder = get_decoder(policy, cfg.rollout)
     tasks = load_tasks(cfg.task.dataset, "train")
-    pairs = [build_prompts(task, tokenizer=policy.tokenizer) for task in tasks[: args.rows]]
+    pairs = [build_prompts(task, tokenizer=policy.tokenizer, images=policy.images) for task in tasks[: args.rows]]
     prompts = [list(pair.student_ids) for pair in pairs]
 
     def run():

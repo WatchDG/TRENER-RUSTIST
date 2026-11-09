@@ -18,7 +18,7 @@ from __future__ import annotations
 import functools
 import logging
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Any
 
 import torch
@@ -60,23 +60,35 @@ def _is_gated_mlp(module: torch.nn.Module) -> bool:
     )
 
 
-def _model_code(model: torch.nn.Module) -> set[str]:
+def _inside(name: str, prefixes: Sequence[str]) -> bool:
+    return any(prefix and (name == prefix or name.startswith(prefix + ".")) for prefix in prefixes)
+
+
+def _model_code(model: torch.nn.Module, skip: Sequence[str] = ()) -> set[str]:
     """Modules with the code of the model's layers: where its RoPE function lives."""
-    return {type(module).__module__ for module in model.modules() if type(module).__name__.endswith("Attention")}
+    return {
+        type(module).__module__
+        for name, module in model.named_modules()
+        if type(module).__name__.endswith("Attention") and not _inside(name, skip)
+    }
 
 
-def fuse_model(model: torch.nn.Module) -> list[str]:
+def fuse_model(model: torch.nn.Module, *, skip: Sequence[str] = ()) -> list[str]:
     """Replaces the model's RMSNorm, MLP and RoPE with fused versions; returns what was replaced.
 
     RMSNorm and MLP are replaced on the instances of this model's modules; RoPE is the function of the
     module with the model's code (`apply_rotary_pos_emb` of the checkpoint's code or of
     `trener.architectures.<architecture>`), i.e. for all models of this class in the process.
     The NF4 dequantization (QLoRA layers) is likewise replaced in `trener.quant` for the whole process.
-    A repeated call changes nothing; `unfuse_model` restores the original functions.
+    A repeated call changes nothing; `unfuse_model` restores the original functions. `skip` — module path
+    prefixes left as they are (the vision tower and the projector: image patch counts vary from image to image,
+    and every new shape would be a new compilation).
     """
     torch._dynamo.config.recompile_limit = max(torch._dynamo.config.recompile_limit, RECOMPILE_LIMIT)
     patched: dict[str, int] = {}
-    for module in model.modules():
+    for name, module in model.named_modules():
+        if _inside(name, skip):
+            continue
         kind = None
         if type(module).__name__.endswith("RMSNorm"):
             kind = "rms_norm"
@@ -87,7 +99,7 @@ def fuse_model(model: torch.nn.Module) -> list[str]:
         module.forward = functools.partial(_cuda_only(type(module).forward), module)
         patched[kind] = patched.get(kind, 0) + 1
 
-    for code in _model_code(model):
+    for code in _model_code(model, skip):
         namespace = sys.modules[code]
         rope = getattr(namespace, "apply_rotary_pos_emb", None)
         if rope is not None and not hasattr(rope, "jolt_original"):

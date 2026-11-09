@@ -131,13 +131,32 @@ AttentionInterface.register(JOLT_SDPA, jolt_sdpa_attention)
 AttentionMaskInterface.register(JOLT_SDPA, sdpa_mask)
 
 
-def use_jolt_attention(model: torch.nn.Module) -> bool:
-    """Switches the model configs from `sdpa` to `jolt_sdpa`; `True` if anything was switched."""
-    found = (getattr(module, "config", None) for module in model.modules())
-    configs = {id(config): config for config in found if config is not None}
+def _inside(name: str, prefixes: Sequence[str]) -> bool:
+    return any(prefix and (name == prefix or name.startswith(prefix + ".")) for prefix in prefixes)
+
+
+def use_jolt_attention(model: torch.nn.Module, *, skip: Sequence[str] = ()) -> bool:
+    """Switches the model configs from `sdpa` to `jolt_sdpa`; `True` if anything was switched.
+
+    `skip` — module path prefixes whose configs stay as they are (the vision tower of a vision-language model:
+    its bidirectional attention over image patches needs neither per-document attention nor the decode step).
+    The configs of the skipped modules are kept even when other modules share them.
+    """
+    skipped = {
+        id(config)
+        for name, module in model.named_modules()
+        if _inside(name, skip) and (config := getattr(module, "config", None)) is not None
+    }
+    found = (getattr(module, "config", None) for name, module in model.named_modules() if not _inside(name, skip))
+    configs = {id(config): config for config in found if config is not None and id(config) not in skipped}
     switched = [config for config in configs.values() if getattr(config, "_attn_implementation", None) == "sdpa"]
     for config in switched:
-        config._attn_implementation = JOLT_SDPA
+        if hasattr(config, "_attn_implementation_internal"):
+            # the setter of a composite config (LFM3-VL) would switch its sub-configs too, the vision one included:
+            # each config is switched on its own, by the modules that use it
+            config._attn_implementation_internal = JOLT_SDPA
+        else:
+            config._attn_implementation = JOLT_SDPA
     return bool(switched)
 
 

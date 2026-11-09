@@ -17,4 +17,5 @@
 *.webp binary
 *.png binary
 *.jpg binary
+*.jpeg binary
 *.safetensors binary

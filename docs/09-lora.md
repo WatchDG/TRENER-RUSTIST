@@ -20,6 +20,7 @@ lora:
   alpha: 32.0          # scale = alpha / r
   dropout: 0.0
   targets: []          # empty — all linear layers except lm_head
+  modules: []          # module groups with adapters; empty — language (12-vision.md)
   merge_init: false
   quantize: none       # nf4 — QLoRA (§7)
   quant_block_size: 64
@@ -33,6 +34,7 @@ lora:
 | `alpha` | `32.0` | scale numerator: the adapter output is multiplied by `alpha / r` |
 | `dropout` | `0.0` | dropout on the adapter input; only `method: sft` (§3) |
 | `targets` | `[]` | short names of the `nn.Linear` layers to adapt; empty — all except the output embeddings |
+| `modules` | `[]` | module groups whose layers are adapted: `language`, `vision`, `projector` (a vision-language model, [12-vision.md](12-vision.md)); empty — `language`, which is every layer of a text-only model. NF4 applies to `language` only |
 | `merge_init` | `false` | `--init-from` of a LoRA checkpoint: merge its adapter into the base and train a new one (§5) |
 | `quantize` | `none` | storage of the frozen base: `none` — `model.dtype`, `nf4` — QLoRA, 4-bit NormalFloat (§7) |
 | `quant_block_size` | `64` | NF4: weights per block with one absmax scale, an even number |

@@ -1,0 +1,35 @@
+{
+  "format": "jolt-corpus",
+  "format_version": 1,
+  "name": "rust-code-output-0001",
+  "description": "The rust-code-output-0001 tasks as qa records with the computation and the boxed answer.",
+  "source": "scripts/make_rust_code_images_0001.py",
+  "splits": {
+    "train": {
+      "files": [
+        {
+          "file": "sft.train.jsonl",
+          "records": 120,
+          "sha256": "3f7a375a3fe111a61af3fea5a4ac01bded8886ef8d44dae70ea9c2d5a74d6296",
+          "images": {
+            "files": 120,
+            "sha256": "48f58b5c7565fafb41f41a60ae74bdd64a78f4d0bb020e0281351f121104e550"
+          }
+        }
+      ]
+    },
+    "test": {
+      "files": [
+        {
+          "file": "sft.test.jsonl",
+          "records": 40,
+          "sha256": "fe4901abec1fb0c34fd60944fcc02fd5f74835c4d040f87ec7fc50d0f8da12be",
+          "images": {
+            "files": 40,
+            "sha256": "1aa3e5ec1499329ef30c3dd3da12f27b0edb48fc68eef14c17193046e69c4ede"
+          }
+        }
+      ]
+    }
+  }
+}

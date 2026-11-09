@@ -213,10 +213,14 @@ def _ratio(numerator: float, denominator: float) -> float:
 
 
 def _mask_kwargs(trajectories: Sequence[Trajectory]) -> dict[str, Any]:
-    """The `masks` argument for `score_sequences`: only if some trajectory has a mask (dialog)."""
-    if all(trajectory.train_mask is None for trajectory in trajectories):
-        return {}
-    return {"masks": [trajectory.train_mask for trajectory in trajectories]}
+    """The `masks` and `images` arguments for `score_sequences`: only if some trajectory has a mask (dialog) or
+    images (a vision-language model)."""
+    kwargs: dict[str, Any] = {}
+    if any(trajectory.train_mask is not None for trajectory in trajectories):
+        kwargs["masks"] = [trajectory.train_mask for trajectory in trajectories]
+    if any(trajectory.images is not None for trajectory in trajectories):
+        kwargs["images"] = [trajectory.images for trajectory in trajectories]
+    return kwargs
 
 
 class _PhaseClock:
@@ -393,7 +397,7 @@ class Trainer:
         if torch.cuda.is_available():
             torch.cuda.reset_peak_memory_stats()
 
-        pairs = [build_prompts(task, tokenizer=self.policy.tokenizer) for task in batch]
+        pairs = [build_prompts(task, tokenizer=self.policy.tokenizer, images=self.policy.images) for task in batch]
         by_id = {task.task_id: task for task in batch}
 
         roles = (STUDENT, TEACHER) if self.uses_teacher else (STUDENT,)

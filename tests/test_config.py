@@ -113,6 +113,14 @@ def _config_with(**overrides: Any) -> JoltConfig:
         ({"task__privileged": "reference_solution"}, "privileged"),
         ({"model__dtype": "int8"}, "dtype"),
         ({"run__seed": -1}, "seed"),
+        ({"model__trainable": ["eyes"]}, "model.trainable: unknown module groups"),
+        ({"model__trainable": ["vision", "vision"]}, "duplicates"),
+        ({"model__image_min_tokens": 0}, "image_min_tokens"),
+        ({"model__image_max_tokens": 10}, "image_max_tokens"),
+        ({"optim__vision_lr_scale": 0.0}, "vision_lr_scale"),
+        ({"optim__projector_lr_scale": -1.0}, "projector_lr_scale"),
+        ({"lora__modules": ["vision"]}, "lora.modules requires lora.enabled"),
+        ({"lora__modules": ["ears"]}, "lora.modules: unknown module groups"),
     ],
 )
 def test_invalid_configs_are_rejected(overrides: dict[str, Any], fragment: str) -> None:
@@ -481,3 +489,19 @@ def test_rust_keywords_preset_points_to_the_tracked_dataset(project_root: Path) 
     assert cfg.task.dataset == project_root / "datasets" / "rust" / "rust-keywords-0001"
     assert (cfg.task.dataset / "dataset.json").is_file()
     assert cfg.rollout.micro_batch_tokens >= cfg.rollout.max_new_tokens + 256
+
+
+def test_trainable_groups_and_lora_exclude_each_other() -> None:
+    cfg = _config_with(lora__enabled=True, model__trainable=["vision"])
+    with pytest.raises(ConfigError, match="with lora.enabled the adapted groups"):
+        validate_config(cfg)
+    validate_config(_config_with(lora__enabled=True, lora__modules=["language", "vision"]))
+
+
+@pytest.mark.parametrize("path", ["configs/smoke_lfm3_vl_rust_code_jolt.yaml", "configs/smoke_sft_lfm3_vl.yaml"])
+def test_vision_presets_load(project_root: Path, path: str) -> None:
+    cfg = load_config(project_root / path)
+    assert cfg.model.path == project_root / "models" / "LFM3-VL-2B"
+    assert cfg.model.trainable == ["language", "vision", "projector"]
+    assert cfg.model.image_max_tokens == 256
+    assert apply_overrides(cfg, ["model.trainable=vision,projector"]).model.trainable == ["vision", "projector"]

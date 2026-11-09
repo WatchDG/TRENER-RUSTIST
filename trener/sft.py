@@ -30,6 +30,7 @@ from .corpus import Document, SftPlan, corpus_fingerprint, load_corpora, load_co
 from .losses import policy_gradient_loss
 from .scoring import score_sequences
 from .trainer import Trainer, _peak_memory_gb, _peak_reserved_gb, _ratio, _synchronize
+from .vision import ImageEncoder
 
 if TYPE_CHECKING:  # pragma: no cover - for typing only
     from .cli import TrainResult
@@ -92,7 +93,14 @@ class SftTrainer(Trainer):
         loss_value = 0.0
         for row in rows:
             items = [doc.item_pair() for doc in row]
-            values = score_sequences(self.policy, items, micro_batch_size=len(items), grad=True, max_tokens=max_tokens)
+            values = score_sequences(
+                self.policy,
+                items,
+                micro_batch_size=len(items),
+                grad=True,
+                max_tokens=max_tokens,
+                **_image_kwargs(row),
+            )
             logps = torch.cat([value.reshape(-1) for value in values])
             loss = policy_gradient_loss(logps, torch.ones_like(logps), n_tokens)
             loss.backward()
@@ -127,11 +135,24 @@ class SftTrainer(Trainer):
         )
 
 
+def _image_kwargs(documents: Sequence[Document]) -> dict[str, Any]:
+    """The `images` argument of `score_sequences`: only if some document has images."""
+    if all(doc.images is None for doc in documents):
+        return {}
+    return {"images": [doc.images for doc in documents]}
+
+
 def evaluate_nll(policy: Policy, documents: Sequence[Document], max_tokens: int) -> dict[str, Any]:
     """Mean NLL of the loss tokens without gradients: overall (weighted by tokens) and per item."""
     policy.set_use_cache(False)
     policy.eval()
-    values = score_sequences(policy, [doc.item_pair() for doc in documents], max_tokens=max_tokens, micro_batch_size=1)
+    values = score_sequences(
+        policy,
+        [doc.item_pair() for doc in documents],
+        max_tokens=max_tokens,
+        micro_batch_size=1,
+        **_image_kwargs(documents),
+    )
     per_item: dict[str, list[float]] = {}
     total = 0.0
     tokens = 0
@@ -155,11 +176,14 @@ def _write_json(path: Path, payload: Any) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
-def build_plan(cfg: JoltConfig, tokenizer: Any) -> tuple[SftPlan, list[Document]]:
-    """Step plan built from the corpus (and the replay corpus), and the documents of the corpus `test` split for NLL."""
+def build_plan(cfg: JoltConfig, tokenizer: Any, images: ImageEncoder | None = None) -> tuple[SftPlan, list[Document]]:
+    """Step plan built from the corpus (and the replay corpus), and the documents of the corpus `test` split for NLL.
+
+    `images` is the image encoder of a vision-language model (records with `images`).
+    """
     sft = cfg.sft
     max_tokens = int(sft.max_tokens)
-    documents, stats = tokenize_records(load_corpora(sft.corpus, "train"), tokenizer, max_tokens)
+    documents, stats = tokenize_records(load_corpora(sft.corpus, "train"), tokenizer, max_tokens, images)
     logger.info(
         "corpus %s: records %d (%s), documents %d, windows for %d long texts, dropped %d",
         ", ".join(Path(path).name for path in sft.corpus),
@@ -171,10 +195,10 @@ def build_plan(cfg: JoltConfig, tokenizer: Any) -> tuple[SftPlan, list[Document]
     )
     replay: list[Document] = []
     if Path(sft.replay) != UNSET_PATH and sft.replay_ratio > 0:
-        replay, replay_stats = tokenize_records(load_corpus(sft.replay, "train"), tokenizer, max_tokens)
+        replay, replay_stats = tokenize_records(load_corpus(sft.replay, "train"), tokenizer, max_tokens, images)
         logger.info("replay %s: documents %d, share of tokens ≈ %.2f", sft.replay, len(replay), sft.replay_ratio)
     test: list[Document] = []
-    test, _ = tokenize_records(load_corpora(sft.corpus, "test", missing_ok=True), tokenizer, max_tokens)
+    test, _ = tokenize_records(load_corpora(sft.corpus, "test", missing_ok=True), tokenizer, max_tokens, images)
     plan = SftPlan(
         documents,
         max_tokens=max_tokens,
@@ -208,7 +232,7 @@ def run_sft(cfg: JoltConfig, *, init_from: str | Path | None = None, resume: str
     if cfg.sft.eval_tasks:
         load_tasks(cfg.task.dataset, cfg.eval.split)
     policy = load_policy(cfg)
-    plan, test_docs = build_plan(cfg, policy.tokenizer)
+    plan, test_docs = build_plan(cfg, policy.tokenizer, policy.images)
     requested, cfg = cfg, resolve_schedule(cfg, plan.steps_per_epoch)
     logger.info(
         "plan: rows per epoch %d of ≤ %d tokens, %d rows per step — %.2f steps per epoch; %d steps — %.2f epochs",
@@ -358,6 +382,8 @@ def make_replay(
         load_model_weights(policy, checkpoint)
     tokenizer = policy.tokenizer
     tasks = _select_tasks(load_tasks(dataset, split), limit, int(cfg.run.seed))
+    if any(task.images for task in tasks):
+        raise ValueError("a replay corpus is made of `completion` records, which cannot carry the tasks' images")
     pairs = [build_prompts(task, privileged=None, tokenizer=tokenizer) for task in tasks]
     batch = EvalConfig(limit=len(tasks), max_new_tokens=max_new_tokens, batch_size=int(cfg.eval.batch_size))
     trajectories = generate(

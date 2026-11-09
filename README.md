@@ -77,7 +77,7 @@ Measure a model on GSM8K (standalone or with `--bench gsm8k` during training) an
 |---|---|
 | `trener/` | The pipeline package (`python -m trener`) |
 | `configs/` | Training presets (`smoke_*` — short checks, `rust_std/`, `rust_cargo/`, `sft_*`, `sequence_*`, `abliterate_*`) |
-| `datasets/` | Task sets (`rust/`, `reverse-rust/`), documentation corpora (`rust-docs/`) and a contrast prompt set example (`abliteration/`), see [docs/06-data.md](docs/06-data.md) |
+| `datasets/` | Task sets (`rust/`, `reverse-rust/`, `rust-vision/` — with images), documentation corpora (`rust-docs/`) and a contrast prompt set example (`abliteration/`), see [docs/06-data.md](docs/06-data.md) |
 | `bench/` | Model benchmarks (`gsm8k`), see [docs/11-benchmarks.md](docs/11-benchmarks.md) |
 | `reports/` | Reports of `python -m trener bench run` |
 | `scripts/` | Dataset and corpus builders, profiling and memory tools, `chat.py` |
@@ -99,6 +99,7 @@ Measure a model on GSM8K (standalone or with `--bench gsm8k` during training) an
 | [docs/09-lora.md](docs/09-lora.md) | Optional LoRA and QLoRA: frozen (optionally 4-bit NF4) base and low-rank adapters for any method, fine-tuning and continuing an adapter |
 | [docs/10-abliteration.md](docs/10-abliteration.md) | Abliteration for experiments: ablating the refusal direction from the weights, Optuna search on refusal rate and KL, contrast prompt sets |
 | [docs/11-benchmarks.md](docs/11-benchmarks.md) | Model benchmarks (GSM8K): standalone or during training, self-contained reports, comparison of reports |
+| [docs/12-vision.md](docs/12-vision.md) | Vision-language models (LFM3-VL): images in tasks and corpora, image tokens, training of the vision tower and the projector |
 
 ## Supported models
 
@@ -107,6 +108,7 @@ Measure a model on GSM8K (standalone or with `--bench gsm8k` during training) an
 | LFM3-1.7B | `Lfm3ForCausalLM` | [LiquidAI/LFM3-1.7B](https://huggingface.co/LiquidAI/LFM3-1.7B) | `configs/` (default path `models/LFM3-1.7B`) |
 | Spark-X2.6-1.7B | `Spark2_5ForCausalLM` | [XHToken/Spark-X2.6-1.7B](https://huggingface.co/XHToken/Spark-X2.6-1.7B) | `configs/smoke_spark_rust_keywords_jolt.yaml`; any config with `--set model.path=models/Spark-X2.6-1.7B` |
 | MiniCPM5-2B | `LlamaForCausalLM` | [openbmb/MiniCPM5-2B](https://huggingface.co/openbmb/MiniCPM5-2B) | `configs/smoke_minicpm_rust_keywords_jolt.yaml`; any config with `--set model.path=models/MiniCPM5-2B` |
+| LFM3-VL-2B | `Lfm3VlForConditionalGeneration` | [LiquidAI/LFM3-VL-2B](https://huggingface.co/LiquidAI/LFM3-VL-2B) | `configs/smoke_lfm3_vl_rust_code_jolt.yaml`, `configs/smoke_sft_lfm3_vl.yaml` (tasks with images, the vision layers train); any config with `--set model.path=models/LFM3-VL-2B` |
 
 The standard configs expect the model in `models/LFM3-1.7B` relative to the repository root. The pipeline does not
 download it: fetch the model in advance and place it there (`snapshot_download` command in
@@ -116,8 +118,13 @@ What the pipeline does differently for a model follows from its architecture —
 model's `config.json` — and each architecture is described in its own module of `trener/architectures/`: LFM3 is
 built by the checkpoint's code (`trust_remote_code`), Spark2_5 by the pipeline's own implementation
 (`trener/architectures/spark2_5.py`; the checkpoint's code does not run in transformers 5), Llama (MiniCPM5) by
-`transformers`. The token that closes an assistant turn is read off the model's chat template and used as EOS
-(`trener/chat_format.py`): in MiniCPM5 it is `<|im_end|>`, not the checkpoint's `</s>`.
+`transformers`, LFM3-VL by the checkpoint's code through `AutoModelForImageTextToText`. The token that closes an
+assistant turn is read off the model's chat template and used as EOS (`trener/chat_format.py`): in MiniCPM5 it is
+`<|im_end|>`, not the checkpoint's `</s>`.
+
+LFM3-VL is a vision-language model: a task or an SFT record may carry images (the `images` field), both roles see
+them before the question, and the vision tower and the projector train together with the language model or on their
+own (`model.trainable`, `optim.vision_lr_scale`, `lora.modules`) — see [docs/12-vision.md](docs/12-vision.md).
 
 ## Contributing
 

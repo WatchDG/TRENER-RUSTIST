@@ -16,6 +16,9 @@ SPARK_PATH = Path(__file__).resolve().parents[1] / "models" / "Spark-X2.6-1.7B"
 #: Directory of the local MiniCPM5-2B checkpoint (may be absent in CI).
 MINICPM_PATH = Path(__file__).resolve().parents[1] / "models" / "MiniCPM5-2B"
 
+#: Directory of the local LFM3-VL-2B checkpoint (may be absent in CI).
+VL_PATH = Path(__file__).resolve().parents[1] / "models" / "LFM3-VL-2B"
+
 
 @pytest.fixture(scope="session")
 def project_root() -> Path:
@@ -240,3 +243,95 @@ def tiny_spark_policy(tokenizer: Any) -> Any:
     torch.manual_seed(0)
     model = Spark2_5ForCausalLM(config)
     return build_policy(model, tokenizer, device=torch.device("cpu"), dtype="float32", with_master=False)
+
+
+# --------------------------------------------------------------- LFM3-VL
+
+
+def make_tiny_vl_model(seed: int = 0) -> Any:
+    """Small random model of the LFM3-VL architecture: the checkpoint's configuration scaled down.
+
+    The language model has the LFM3 layer kinds (conv, full and sliding attention), the vision tower a convolution
+    and an attention layer; the vocabulary and the image token are those of the checkpoint.
+    """
+    import torch
+    from transformers import AutoConfig, AutoModelForImageTextToText
+
+    try:
+        config = AutoConfig.from_pretrained(str(VL_PATH), trust_remote_code=True)
+    except Exception as exc:  # pragma: no cover - model directory is missing
+        pytest.skip(f"LFM3-VL configuration is unavailable: {exc}")
+    text = config.text_config
+    text.hidden_size = 64
+    text.intermediate_size = 128
+    text.num_attention_heads = 4
+    text.num_key_value_heads = 2
+    text.head_dim = 16
+    text.layer_types = ["conv", "conv", "full_attention", "conv", "sliding_attention", "conv"]
+    text.num_hidden_layers = 6
+    text.sliding_window = 32
+    vision = config.vision_config
+    vision.hidden_size = 32
+    vision.intermediate_size = 64
+    vision.num_attention_heads = 4
+    vision.num_key_value_heads = 2
+    vision.layer_types = ["conv", "full_attention"]
+    vision.num_hidden_layers = 2
+    config.projector_hidden_size = 64
+    torch.manual_seed(seed)
+    return AutoModelForImageTextToText.from_config(config, trust_remote_code=True, dtype=torch.float32)
+
+
+@pytest.fixture(scope="session")
+def vl_tokenizer() -> Any:
+    """LFM3-VL tokenizer as the pipeline loads it."""
+    from trener.chat_format import load_tokenizer
+
+    if not (VL_PATH / "tokenizer_config.json").is_file():
+        pytest.skip(f"LFM3-VL tokenizer is unavailable: {VL_PATH}")
+    return load_tokenizer(VL_PATH)
+
+
+@pytest.fixture(scope="session")
+def vl_encoder() -> Any:
+    """Image encoder of the LFM3-VL checkpoint with a small budget: 4–16 tokens per image."""
+    pytest.importorskip("torchvision")
+    from trener.vision import load_image_encoder
+
+    if not (VL_PATH / "processor_config.json").is_file():
+        pytest.skip(f"LFM3-VL processor is unavailable: {VL_PATH}")
+    return load_image_encoder(VL_PATH, min_tokens=4, max_tokens=16)
+
+
+@pytest.fixture(scope="session")
+def vl_images(tmp_path_factory: pytest.TempPathFactory) -> list[Path]:
+    """Three random images of different sizes."""
+    import numpy as np
+    from PIL import Image
+
+    directory = tmp_path_factory.mktemp("vl_images")
+    rng = np.random.default_rng(0)
+    paths = []
+    for index, (width, height) in enumerate([(96, 64), (64, 64), (128, 96)]):
+        path = directory / f"image-{index}.png"
+        Image.fromarray(rng.integers(0, 255, (height, width, 3), dtype=np.uint8)).save(path)
+        paths.append(path)
+    return paths
+
+
+@pytest.fixture(scope="session")
+def tiny_vl_policy(vl_tokenizer: Any, vl_encoder: Any) -> Any:
+    """Small random LFM3-VL model without master weights (decoding and scoring)."""
+    import torch
+    from trener.modeling import build_policy
+
+    model = make_tiny_vl_model()
+    return build_policy(
+        model, vl_tokenizer, device=torch.device("cpu"), dtype="float32", with_master=False, images=vl_encoder
+    )
+
+
+@pytest.fixture(scope="session")
+def vl_model_factory() -> Any:
+    """`make_tiny_vl_model`: a fresh small LFM3-VL model per call (tests that change weights or freeze groups)."""
+    return make_tiny_vl_model

@@ -1,0 +1,28 @@
+{
+  "format": "jolt-tasks",
+  "format_version": 1,
+  "name": "rust-code-output-0001",
+  "description": "Short Rust programs shown as images; the task is the number the program prints. For vision-language models (LFM3-VL): the program is only in the image.",
+  "source": "scripts/make_rust_code_images_0001.py",
+  "default_answer_type": "number",
+  "splits": {
+    "train": {
+      "file": "train.jsonl",
+      "records": 120,
+      "sha256": "7b35666457dfe6ac2037917949908cdf8a142a824466875e43b3e3f76505a67b",
+      "images": {
+        "files": 120,
+        "sha256": "48f58b5c7565fafb41f41a60ae74bdd64a78f4d0bb020e0281351f121104e550"
+      }
+    },
+    "test": {
+      "file": "test.jsonl",
+      "records": 40,
+      "sha256": "7c88f7d40934f7cbccccd34fafec57906e281a9ec0c534c323bead1f423b6829",
+      "images": {
+        "files": 40,
+        "sha256": "1aa3e5ec1499329ef30c3dd3da12f27b0edb48fc68eef14c17193046e69c4ede"
+      }
+    }
+  }
+}

@@ -304,3 +304,100 @@ def test_epoch_progress_counts_passes_over_the_train_set() -> None:
         epoch_progress(1, 4, 0)
     with pytest.raises(ValueError):
         epoch_progress(-1, 4, 10)
+
+
+# ------------------------------------------------------------------------ images
+
+
+def _image(path: Path, color: tuple[int, int, int] = (200, 10, 10)) -> Path:
+    from PIL import Image
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", (16, 16), color).save(path)
+    return path
+
+
+def test_images_are_resolved_within_the_dataset(tmp_path: Path) -> None:
+    root = tmp_path / "set"
+    image = _image(root / "images" / "a.png")
+    _dataset(root, {"train": ['{"question": "What is shown?", "answer": "4", "images": ["images/a.png"]}', GOOD]})
+    with_image, without = load_tasks(root, "train")
+    assert with_image.images == (str(image.resolve()),)
+    assert without.images == ()
+    summary = validate_dataset(root)
+    assert summary.with_images == {"train": 1} and summary.image_files == {"train": 1}
+
+
+@pytest.mark.parametrize(
+    ("images", "expected"),
+    [
+        ('"images/a.png"', "non-empty list"),
+        ("[]", "non-empty list"),
+        ("[1]", "non-empty list"),
+        ('["../a.png"]', "without .."),
+        ('["/abs/a.png"]', "relative path"),
+        ('["C:/a.png"]', "relative path"),
+        (r'["images\\a.png"]', "relative path"),
+        ('["images/a.txt"]', "not an image file"),
+        ('["images/missing.png"]', "not found"),
+    ],
+)
+def test_bad_images_are_rejected(tmp_path: Path, images: str, expected: str) -> None:
+    root = tmp_path / "set"
+    _image(root / "images" / "a.png")
+    _dataset(root, {"train": [f'{{"question": "Q?", "answer": "4", "images": {images}}}']})
+    with pytest.raises(DataError, match=expected):
+        load_tasks(root, "train")
+
+
+def test_images_are_stamped_and_a_changed_image_is_detected(tmp_path: Path) -> None:
+    root = tmp_path / "set"
+    image = _image(root / "images" / "a.png")
+    _dataset(root, {"train": ['{"question": "Q?", "answer": "4", "images": ["images/a.png"]}'], "test": [GOOD]})
+    manifest = update_manifest(root)
+    assert manifest["splits"]["train"]["images"]["files"] == 1
+    assert "images" not in manifest["splits"]["test"]
+    before = dataset_fingerprint(root)
+    _image(image, (10, 200, 10))
+    with pytest.raises(DataError, match="images of the records do not match"):
+        load_tasks(root, "train")
+    update_manifest(root)
+    assert dataset_fingerprint(root)["splits"]["train"] != before["splits"]["train"]
+    assert dataset_fingerprint(root)["splits"]["test"] == before["splits"]["test"]
+
+
+def test_write_dataset_writes_images_relative_to_the_dataset(tmp_path: Path) -> None:
+    root = tmp_path / "set"
+    image = _image(root / "images" / "a.png")
+    tasks = [Task("a", "Q?", "4", privileged="4", images=(str(image),))]
+    manifest = write_dataset(root, "t", {"train": tasks})
+    record = json.loads((root / "train.jsonl").read_text(encoding="utf-8"))
+    assert record["images"] == ["images/a.png"]
+    assert manifest["splits"]["train"]["images"]["files"] == 1
+    assert load_tasks(root, "train")[0].images == (str(image.resolve()),)
+    outside = _image(tmp_path / "elsewhere.png")
+    with pytest.raises(DataError, match="outside the dataset directory"):
+        write_dataset(root, "t", {"train": [Task("b", "Q?", "4", privileged="4", images=(str(outside),))]})
+
+
+def test_same_question_about_different_images_is_no_overlap(tmp_path: Path) -> None:
+    root = tmp_path / "set"
+    _image(root / "images" / "a.png")
+    _image(root / "images" / "b.png")
+    line = '{{"question": "What is shown?", "answer": "4", "images": ["images/{}.png"]}}'
+    _dataset(root, {"train": [line.format("a")], "test": [line.format("b")]})
+    assert validate_dataset(root).overlap == {}
+    _dataset(root, {"train": [line.format("a")], "test": [line.format("a")]})
+    assert validate_dataset(root).overlap == {("test", "train"): 1}
+
+
+def test_tutor_records_cannot_carry_images(tmp_path: Path) -> None:
+    root = tmp_path / "set"
+    _image(root / "images" / "a.png")
+    record = (
+        '{"topic": "T", "focus": "F", "user_answer": "U", "user_correct": true, "answer": "A", '
+        '"images": ["images/a.png"]}'
+    )
+    _dataset(root, {"train": [record]}, mode="tutor")
+    with pytest.raises(DataError, match="unknown fields"):
+        load_tasks(root, "train")

@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-11-09
+
+### Added
+
+- LFM3-VL-2B (`Lfm3VlForConditionalGeneration`, [LiquidAI/LFM3-VL-2B](https://huggingface.co/LiquidAI/LFM3-VL-2B)):
+  the architecture module `trener/architectures/lfm3_vl.py` (the model is built by the checkpoint's code through
+  `AutoModelForImageTextToText`; the abliteration projections are those of LFM3 in `model.language_model.layers`)
+  and `docs/12-vision.md`.
+- Images in the data: the optional `images` field of a `jolt-tasks` record and of a `qa` corpus record (image files
+  of the dataset or corpus directory), stamped in the manifest (`images: {files, sha256}`) and part of the dataset
+  fingerprint. Both roles see the images before the question; `trener/vision.py` encodes them with the checkpoint's
+  image processor within `model.image_min_tokens`…`model.image_max_tokens` (one token — 32×32 pixels) and expands
+  `<|image|>` into the image's tokens. JOLT/JOLT+, `opsd`, `grpo`, `sft`, the evaluation and both decode engines
+  pass the images to the model: scoring and the prefill of the static engine feed `inputs_embeds` with the image
+  features, each distinct image of a row is encoded once.
+- Training of the vision layers: `model.trainable` (module groups `language`, `vision`, `projector`; empty — all)
+  freezes the other groups, which get no master weights; `optim.vision_lr_scale` and `optim.projector_lr_scale`
+  scale the learning rate of the vision tower and the projector; `lora.modules` picks the groups that get LoRA
+  adapters (default `language`), QLoRA quantizes the language model only.
+- The image set `datasets/rust-vision/rust-code-output-0001` (Rust programs rendered as images, the number they
+  print; also an SFT corpus with images) and its generator `scripts/make_rust_code_images_0001.py` (answers checked
+  with `rustc`); the smoke presets `configs/smoke_lfm3_vl_rust_code_jolt.yaml` and `configs/smoke_sft_lfm3_vl.yaml`.
+- Dependencies: `torchvision` (CUDA build) and `Pillow` for the image processor.
+
+### Changed
+
+- `use_jolt_attention` switches each config on its own (`_attn_implementation_internal`): the setter of a composite
+  config would also switch its sub-configs; the vision tower keeps `sdpa`, and `fuse_model` skips it.
+- `data validate` compares questions across splits together with their images and reports the tasks with images.
+- The model fingerprint also covers `processor_config.json` when the model has one (fingerprints of text-only models
+  are unchanged).
+
 ## [0.8.0] - 2026-11-05
 
 ### Added
@@ -185,7 +217,8 @@ First release.
 - Tests that need the LFM3 tokenizer are skipped when `models/LFM3-1.7B` is
   absent instead of failing.
 
-[Unreleased]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.5.0...v0.6.0

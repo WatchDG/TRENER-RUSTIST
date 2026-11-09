@@ -137,6 +137,13 @@ class ModelConfig:
     compile_kernels: bool = False
     #: Selective checkpointing: `matmul` and SDPA are not recomputed in backward (requires `gradient_checkpointing`).
     selective_checkpointing: bool = False
+    #: Module groups trained without LoRA (`language`, `vision`, `projector` — `trener.architectures`); empty — all
+    #: groups of the model. The other groups are frozen and get no master weights.
+    trainable: list[str] = field(default_factory=list)
+    #: Token budget of one image of a vision-language model (one token — 32×32 pixels, `trener.vision`): the image
+    #: is resized so that its token count lies within `[image_min_tokens, image_max_tokens]`.
+    image_min_tokens: int = 64
+    image_max_tokens: int = 1024
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -147,6 +154,9 @@ class ModelConfig:
             "gradient_checkpointing": self.gradient_checkpointing,
             "compile_kernels": self.compile_kernels,
             "selective_checkpointing": self.selective_checkpointing,
+            "trainable": list(self.trainable),
+            "image_min_tokens": self.image_min_tokens,
+            "image_max_tokens": self.image_max_tokens,
         }
 
 
@@ -237,6 +247,9 @@ class OptimConfig:
     master_storage: str = "fp32"
     #: Memory-saving mode: lower halves of master in pinned RAM, the optimizer step streams through the GPU.
     master_offload: bool = False
+    #: Learning rate multipliers of the vision tower and the projector of a vision-language model (`lr × scale`).
+    vision_lr_scale: float = 1.0
+    projector_lr_scale: float = 1.0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -253,6 +266,8 @@ class OptimConfig:
             "warmup_epochs": self.warmup_epochs,
             "master_storage": self.master_storage,
             "master_offload": self.master_offload,
+            "vision_lr_scale": self.vision_lr_scale,
+            "projector_lr_scale": self.projector_lr_scale,
         }
 
 
@@ -298,6 +313,9 @@ class LoraConfig:
     #: Short names of the `nn.Linear` modules to adapt (`q_proj`, `w1`, `in_proj`, …); empty — all linear
     #: layers except the output embeddings (`lm_head`).
     targets: list[str] = field(default_factory=list)
+    #: Module groups whose linear layers get adapters (`language`, `vision`, `projector`); empty — `language`.
+    #: NF4 (`quantize`) applies to the `language` group only.
+    modules: list[str] = field(default_factory=list)
     #: `--init-from` of a LoRA checkpoint: merge its adapter into the base and train a new one
     #: (by default the run continues training the same adapter).
     merge_init: bool = False
@@ -320,6 +338,7 @@ class LoraConfig:
             "alpha": self.alpha,
             "dropout": self.dropout,
             "targets": list(self.targets),
+            "modules": list(self.modules),
             "merge_init": self.merge_init,
             "quantize": self.quantize,
             "quant_block_size": self.quant_block_size,
@@ -615,9 +634,7 @@ def validate_cuda_alloc_conf(value: str) -> None:
     for part in value.split(","):
         key, separator, setting = part.partition(":")
         if not separator or not key.strip() or not setting.strip():
-            raise ConfigError(
-                f"run.cuda_alloc_conf={value!r}: expected 'key:value[,key:value]', invalid part {part!r}"
-            )
+            raise ConfigError(f"run.cuda_alloc_conf={value!r}: expected 'key:value[,key:value]', invalid part {part!r}")
         if key.strip() == "expandable_segments":
             raise ConfigError("run.cuda_alloc_conf: expandable_segments is not supported on Windows")
 
@@ -649,6 +666,16 @@ def validate_config(cfg: JoltConfig) -> JoltConfig:
         raise ConfigError("model.path must not be empty")
     if cfg.model.selective_checkpointing and not cfg.model.gradient_checkpointing:
         raise ConfigError("model.selective_checkpointing requires model.gradient_checkpointing: true")
+    _check_groups("model.trainable", cfg.model.trainable)
+    if not 0 < cfg.model.image_min_tokens <= cfg.model.image_max_tokens:
+        raise ConfigError(
+            "model.image_min_tokens and model.image_max_tokens must satisfy 0 < min ≤ max, got "
+            f"{cfg.model.image_min_tokens} and {cfg.model.image_max_tokens}"
+        )
+    for key in ("vision_lr_scale", "projector_lr_scale"):
+        value = getattr(cfg.optim, key)
+        if not math.isfinite(value) or value <= 0:
+            raise ConfigError(f"optim.{key} must be > 0, got {value} (freeze a group with model.trainable)")
 
     if not str(cfg.task.dataset).strip() or Path(cfg.task.dataset) == Path("."):
         raise ConfigError(
@@ -668,9 +695,7 @@ def validate_config(cfg: JoltConfig) -> JoltConfig:
     if cfg.rollout.micro_batch_size < 1:
         raise ConfigError(f"rollout.micro_batch_size must be ≥ 1, got {cfg.rollout.micro_batch_size}")
     if cfg.rollout.generation_batch_size < 1:
-        raise ConfigError(
-            f"rollout.generation_batch_size must be ≥ 1, got {cfg.rollout.generation_batch_size}"
-        )
+        raise ConfigError(f"rollout.generation_batch_size must be ≥ 1, got {cfg.rollout.generation_batch_size}")
     if cfg.rollout.engine not in ENGINES:
         raise ConfigError(f"rollout.engine={cfg.rollout.engine!r} is not allowed; allowed values: {list(ENGINES)}")
     if cfg.rollout.decode_check_every < 1:
@@ -704,13 +729,10 @@ def validate_config(cfg: JoltConfig) -> JoltConfig:
     if not math.isfinite(cfg.optim.lr) or cfg.optim.lr <= 0:
         raise ConfigError(f"optim.lr must be > 0, got {cfg.optim.lr}")
     if cfg.optim.optimizer not in OPTIMIZERS:
-        raise ConfigError(
-            f"optim.optimizer={cfg.optim.optimizer!r} is not allowed; allowed values: {list(OPTIMIZERS)}"
-        )
+        raise ConfigError(f"optim.optimizer={cfg.optim.optimizer!r} is not allowed; allowed values: {list(OPTIMIZERS)}")
     if cfg.optim.master_storage not in MASTER_STORAGES:
         raise ConfigError(
-            f"optim.master_storage={cfg.optim.master_storage!r} is not allowed; "
-            f"allowed values: {list(MASTER_STORAGES)}"
+            f"optim.master_storage={cfg.optim.master_storage!r} is not allowed; allowed values: {list(MASTER_STORAGES)}"
         )
     if cfg.optim.master_storage == "split" and (cfg.optim.optimizer != "adafactor" or not cfg.optim.master_weights):
         raise ConfigError(
@@ -735,8 +757,7 @@ def validate_config(cfg: JoltConfig) -> JoltConfig:
         )
     if cfg.method in TEACHER_METHODS and cfg.optim.beta_teacher_kl < 0:
         raise ConfigError(
-            f"optim.beta_teacher_kl (β_T) must be ≥ 0 for method {cfg.method!r}, "
-            f"got {cfg.optim.beta_teacher_kl}"
+            f"optim.beta_teacher_kl (β_T) must be ≥ 0 for method {cfg.method!r}, got {cfg.optim.beta_teacher_kl}"
         )
 
     if cfg.eval.every < 1:
@@ -764,17 +785,38 @@ def validate_config(cfg: JoltConfig) -> JoltConfig:
     return cfg
 
 
+def _check_groups(key: str, groups: list[str]) -> None:
+    """Names of module groups (`trener.architectures.MODULE_GROUPS`) without duplicates."""
+    from .architectures.base import MODULE_GROUPS
+
+    unknown = [group for group in groups if group not in MODULE_GROUPS]
+    if unknown:
+        raise ConfigError(f"{key}: unknown module groups {unknown}; allowed: {list(MODULE_GROUPS)}")
+    if len(set(groups)) != len(groups):
+        raise ConfigError(f"{key} contains duplicates: {groups}")
+
+
 def _validate_lora(cfg: JoltConfig) -> None:
     """Invariants of the `lora` section (target names are checked against the model in `trener.lora.apply_lora`)."""
     lora = cfg.lora
     if lora.quantize not in QUANTIZATIONS:
         raise ConfigError(f"lora.quantize={lora.quantize!r} is not allowed; allowed values: {list(QUANTIZATIONS)}")
+    _check_groups("lora.modules", lora.modules)
     if not lora.enabled:
         if lora.merge_init:
             raise ConfigError("lora.merge_init requires lora.enabled: true")
         if lora.quantize != "none":
             raise ConfigError(f"lora.quantize: {lora.quantize} requires lora.enabled: true")
+        if lora.modules:
+            raise ConfigError(
+                "lora.modules requires lora.enabled: true (without LoRA groups are set by model.trainable)"
+            )
         return
+    if cfg.model.trainable:
+        raise ConfigError(
+            "model.trainable selects the groups of full fine-tuning; with lora.enabled the adapted groups "
+            "are lora.modules"
+        )
     if lora.r < 1:
         raise ConfigError(f"lora.r must be ≥ 1, got {lora.r}")
     if not math.isfinite(lora.alpha) or lora.alpha <= 0:
@@ -817,9 +859,7 @@ def _validate_bench(bench: BenchConfig) -> None:
 def _validate_sft(sft: SftConfig) -> None:
     """Invariants of the `sft` section (checked only when `method: sft`)."""
     if not sft.corpus:
-        raise ConfigError(
-            "method=sft requires sft.corpus — a jolt-corpus directory or a list of them (docs/08-sft.md)"
-        )
+        raise ConfigError("method=sft requires sft.corpus — a jolt-corpus directory or a list of them (docs/08-sft.md)")
     if sft.max_tokens < PACKING_PROMPT_MARGIN:
         raise ConfigError(f"sft.max_tokens must be ≥ {PACKING_PROMPT_MARGIN}, got {sft.max_tokens}")
     if sft.rows_per_step < 1:

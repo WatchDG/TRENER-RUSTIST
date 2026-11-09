@@ -29,6 +29,7 @@ from typing import TYPE_CHECKING, Any
 import torch
 
 from .adafactor import FunctionalAdafactor
+from .architectures import PROJECTOR, VISION, architecture_of
 from .master import merge_master_, split_master_
 
 if TYPE_CHECKING:  # pragma: no cover - for typing only
@@ -237,7 +238,8 @@ class OptimizerHandle:
         factor = self._lr_factor(step)
         lr = self.base_lr * factor
         for group in self.optimizer.param_groups:
-            group["lr"] = lr
+            # Adafactor scales per parameter (`FunctionalAdafactor.lr_scales`), AdamW per group
+            group["lr"] = lr * float(group.get("lr_scale", 1.0))
         self.current_lr = lr
         return lr
 
@@ -269,8 +271,20 @@ class OptimizerHandle:
             self.optimizer.load_state_dict(state["optimizer"])
 
 
+def lr_scales(cfg: JoltConfig, policy: Policy) -> list[float]:
+    """Learning rate multiplier of each master parameter by its module group (`optim.vision_lr_scale`,
+    `optim.projector_lr_scale`; the language model — 1)."""
+    architecture = architecture_of(policy.model)
+    by_group = {VISION: float(cfg.optim.vision_lr_scale), PROJECTOR: float(cfg.optim.projector_lr_scale)}
+    return [by_group.get(architecture.group_of(name), 1.0) for name in policy.master_names]
+
+
 def build_optimizer(cfg: JoltConfig, policy: Policy) -> OptimizerHandle:
-    """Builds the optimizer over the master weights of the model (fp32 tensors or bf16 + `int16`)."""
+    """Builds the optimizer over the master weights of the model (fp32 tensors or bf16 + `int16`).
+
+    The vision tower and the projector of a vision-language model may train with their own learning rate
+    (`lr × optim.vision_lr_scale`, `lr × optim.projector_lr_scale`).
+    """
     master_parameters = list(policy.master_tensors)
     if policy.n_master == 0:
         raise ValueError("master weights are not created: nothing to optimize")
@@ -279,6 +293,7 @@ def build_optimizer(cfg: JoltConfig, policy: Policy) -> OptimizerHandle:
         if getattr(master, "grad_dtype", torch.float32) is not None:
             master.grad_dtype = None
 
+    scales = lr_scales(cfg, policy)
     backend = cfg.optim.optimizer
     optimizer: Any
     if policy.master_storage == "split" and backend != "adafactor":
@@ -287,8 +302,11 @@ def build_optimizer(cfg: JoltConfig, policy: Policy) -> OptimizerHandle:
         try:
             from bitsandbytes.optim import AdamW8bit  # type: ignore[import-not-found]
 
+            groups: dict[float, list[torch.nn.Parameter]] = {}
+            for master, scale in zip(master_parameters, scales, strict=True):
+                groups.setdefault(scale, []).append(master)
             optimizer = AdamW8bit(
-                master_parameters,
+                [{"params": params, "lr_scale": scale} for scale, params in groups.items()],
                 lr=float(cfg.optim.lr),
                 betas=(0.9, 0.999),
                 eps=1e-8,
@@ -302,9 +320,9 @@ def build_optimizer(cfg: JoltConfig, policy: Policy) -> OptimizerHandle:
             )
             logger.warning("bitsandbytes is unavailable (%s) — falling back to Adafactor", exc)
             backend = "adafactor"
-            optimizer = FunctionalAdafactor(policy.n_master, lr=float(cfg.optim.lr))
+            optimizer = FunctionalAdafactor(policy.n_master, lr=float(cfg.optim.lr), lr_scales=scales)
     else:
-        optimizer = FunctionalAdafactor(policy.n_master, lr=float(cfg.optim.lr))
+        optimizer = FunctionalAdafactor(policy.n_master, lr=float(cfg.optim.lr), lr_scales=scales)
 
     handle = OptimizerHandle(
         optimizer=optimizer,
@@ -317,7 +335,7 @@ def build_optimizer(cfg: JoltConfig, policy: Policy) -> OptimizerHandle:
     )
     handle.current_lr = float(cfg.optim.lr)
     for group in optimizer.param_groups:
-        group["lr"] = float(cfg.optim.lr)
+        group["lr"] = float(cfg.optim.lr) * float(group.get("lr_scale", 1.0))
     handle.state["backend"] = backend
     logger.info("optimizer: %s, master: %s, parameters: %d", backend, policy.master_storage, policy.n_master)
     return handle

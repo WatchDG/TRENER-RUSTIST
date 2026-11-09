@@ -12,7 +12,7 @@ contracts are in the docstrings of the corresponding `trener/` modules.
 | Driver | 617.42 (verified: `nvidia-smi`, CUDA UMD 13.4) |
 | Python | 3.13 (3.14 lags behind in `torch`/`tokenizers` wheels) |
 | OS | Windows, PowerShell |
-| Model | local directory `models\LFM3-1.7B` relative to the repository root (LFM3-1.7B, custom architecture, `trust_remote_code=True`), or `models\Spark-X2.6-1.7B` (Spark-X2.6-1.7B, the pipeline's own implementation), or `models\MiniCPM5-2B` (MiniCPM5-2B, the `transformers` Llama); must be downloaded in advance, see 7.1a |
+| Model | local directory `models\LFM3-1.7B` relative to the repository root (LFM3-1.7B, custom architecture, `trust_remote_code=True`), or `models\Spark-X2.6-1.7B` (Spark-X2.6-1.7B, the pipeline's own implementation), or `models\MiniCPM5-2B` (MiniCPM5-2B, the `transformers` Llama), or `models\LFM3-VL-2B` (LFM3-VL-2B, vision-language, [12-vision.md](12-vision.md)); must be downloaded in advance, see 7.1a |
 | Disk | ~9.9 GB per checkpoint (bf16 model weights ~3.2 GB + fp32 master weights ~6.6 GB) |
 
 ### 7.1a Model
@@ -42,6 +42,15 @@ the checkpoint has no code):
 .venv\Scripts\python.exe -c "from huggingface_hub import snapshot_download; snapshot_download('openbmb/MiniCPM5-2B', local_dir='models/MiniCPM5-2B')"
 ```
 
+LFM3-VL-2B goes to `models/LFM3-VL-2B`; its tasks and corpus records may carry images, and the vision tower and the
+projector train together with the language model ([12-vision.md](12-vision.md)). The smoke presets
+`configs/smoke_lfm3_vl_rust_code_jolt.yaml` (JOLT) and `configs/smoke_sft_lfm3_vl.yaml` (`sft`) run on the image set
+`datasets/rust-vision/rust-code-output-0001`; a text-only config runs on it with `--set model.path=models/LFM3-VL-2B`:
+
+```powershell
+.venv\Scripts\python.exe -c "from huggingface_hub import snapshot_download; snapshot_download('LiquidAI/LFM3-VL-2B', local_dir='models/LFM3-VL-2B')"
+```
+
 MiniCPM5-2B is larger than LFM3-1.7B (2.52 B parameters, of them 0.53 B in the untied input and output embeddings
 of a 130 560-token vocabulary): its bf16 weights take ~4.7 GB instead of ~3.2 GB, a checkpoint ~14.1 GB (bf16
 weights + fp32 master weights ~9.4 GB). The smoke preset peaks at 15.3 GB of VRAM (19.2 GB reserved) on an RTX 4090.
@@ -54,6 +63,7 @@ model's `config.json`, not by its name or path; each architecture is described i
 |---|---|---|---|
 | `Lfm3ForCausalLM` | `lfm3.py` | the checkpoint's code (`modeling_lfm3.py`, `model.trust_remote_code: true`) | `conv.out_proj` / `self_attn.o_proj`, `feed_forward.w2`; sandwich post-norms |
 | `Spark2_5ForCausalLM` | `spark2_5.py` | the pipeline's own implementation; `model.trust_remote_code` is not used | `self_attn.out_proj`, `mlp.down_proj` |
+| `Lfm3VlForConditionalGeneration` (LFM3-VL) | `lfm3_vl.py` | the checkpoint's code through `AutoModelForImageTextToText` (`model.trust_remote_code: true`); module groups `language`, `vision`, `projector` | those of LFM3 in `model.language_model.layers`; the vision tower is not touched |
 | `LlamaForCausalLM` (MiniCPM5) | `llama.py` | `transformers` (`AutoModelForCausalLM`, `model_type: llama`); the checkpoint has no code | `self_attn.o_proj`, `mlp.down_proj` |
 | any other | — | `AutoModelForCausalLM` | `self_attn.o_proj`, `mlp.down_proj` |
 
@@ -95,6 +105,7 @@ py -3.13 -m venv .venv
 ```
 
 For development (tests, lint) add `-r requirements-dev.txt`, see [CONTRIBUTING.md](../CONTRIBUTING.md).
+`torchvision` (the CUDA build, from the same index) and `Pillow` are needed by the image processor of LFM3-VL.
 
 > **Important about `torch`.** The regular `torch` wheels on PyPI for Windows contain
 > only the CPU build (`2.13.0+cpu`, `torch.cuda.is_available() == False`).
@@ -110,7 +121,7 @@ Checking the environment:
 .venv\Scripts\python.exe -c "import trener; print(trener.__version__)"
 ```
 
-Expected: `2.13.0+cu130 13.0 True` and `0.8.0`.
+Expected: `2.13.0+cu130 13.0 True` and `0.9.0`.
 
 Data: the presets read tasks from the dataset directory `datasets/rust/rust-keywords-0001` (field `task.dataset`,
 format — [06-data.md](06-data.md)). Checking the dataset:
@@ -135,6 +146,8 @@ The dialogue where "the model asks a question and evaluates the user's answer" (
 | `method: grpo` in `configs/rust_std/rust_keywords_jolt.yaml` | `grpo` | mode without the teacher branch and without distillation (`G=8`, `lr=1e-6`) |
 | `configs/smoke_spark_rust_keywords_jolt.yaml` | `jolt` | the smoke run of `rust-keywords-0001` on Spark-X2.6-1.7B (`Spark2_5ForCausalLM`, §7.1a) |
 | `configs/smoke_minicpm_rust_keywords_jolt.yaml` | `jolt` | the smoke run of `rust-keywords-0001` on MiniCPM5-2B (`LlamaForCausalLM`, §7.1a) |
+| `configs/smoke_lfm3_vl_rust_code_jolt.yaml` | `jolt` | the smoke run of the image set `rust-code-output-0001` on LFM3-VL-2B: the vision tower, the projector and the language model train ([12-vision.md](12-vision.md)) |
+| `configs/smoke_sft_lfm3_vl.yaml` | `sft` | the `sft` smoke run of LFM3-VL-2B on the corpus with images of `rust-code-output-0001` ([12-vision.md](12-vision.md)) |
 | `configs/smoke_tutor_rust_jolt.yaml` | `jolt` | short run of the tutor mode: 3 steps, `B=2`, `G=2`, `max_new_tokens=128`, `eval.limit=8` |
 | `configs/smoke_lora_rust_keywords_jolt.yaml` | `jolt` | smoke run with LoRA: frozen base, rank-16 adapters on all linear layers, `lr=1e-5` ([09-lora.md](09-lora.md)) |
 | `configs/smoke_qlora_rust_keywords_jolt.yaml` | `jolt` | the same smoke run with QLoRA: the frozen base in 4-bit NF4 ([09-lora.md §7](09-lora.md)) |
@@ -399,6 +412,7 @@ AutoModelForCausalLM.from_pretrained("dist/<name>", trust_remote_code=True)  # L
 from trener.architectures.spark2_5 import Spark2_5ForCausalLM
 Spark2_5ForCausalLM.from_pretrained("dist/<name>")  # Spark2_5: its own code does not run in transformers 5
 AutoModelForCausalLM.from_pretrained("dist/<name>")  # Llama (MiniCPM5): transformers' own code
+AutoModelForImageTextToText.from_pretrained("dist/<name>", trust_remote_code=True)  # LFM3-VL, with AutoProcessor
 ``` The model is released between stages, but the process is one:
 the `torch` compilation cache is shared.
 

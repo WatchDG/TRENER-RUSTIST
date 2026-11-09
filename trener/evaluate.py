@@ -124,7 +124,9 @@ def generate_greedy(
     """
     # Privileged information is not used in the evaluation: the student branch
     # is built without `c`.
-    prompt_pairs = [build_prompts(task, privileged=None, tokenizer=policy.tokenizer) for task in tasks]
+    prompt_pairs = [
+        build_prompts(task, privileged=None, tokenizer=policy.tokenizer, images=policy.images) for task in tasks
+    ]
 
     trajectories = generate(
         policy,

@@ -517,6 +517,10 @@ def cmd_data_validate(args: argparse.Namespace) -> int:
             f"question length ≤ {summary.max_question_chars[split]}, "
             f"reason ≤ {summary.max_reason_chars[split]} characters"
         )
+        if summary.with_images.get(split):
+            print(
+                f"  {split}: with images — {summary.with_images[split]} tasks, {summary.image_files[split]} image files"
+            )
     for (first, second), shared in summary.overlap.items():
         print(f"  warning: {shared} identical questions in {first} and {second}")
     if summary.unsealed:
@@ -534,10 +538,11 @@ def _print_prompt_lengths(args: argparse.Namespace) -> None:
 
     cfg = load_config(args.config)
     tokenizer = load_tokenizer(cfg.model.path, trust_remote_code=cfg.model.trust_remote_code)
+    images = _image_encoder(cfg)
     longest = 0
     dialog = read_manifest(args.path).get("mode", "qa") == "tutor"
     for split in read_manifest(args.path)["splits"]:
-        pairs = [build_prompts(task, tokenizer=tokenizer) for task in load_tasks(args.path, split)]
+        pairs = [build_prompts(task, tokenizer=tokenizer, images=images) for task in load_tasks(args.path, split)]
         student = max((len(pair.student_ids) for pair in pairs), default=0)
         teacher = max((len(pair.teacher_ids) for pair in pairs), default=0)
         # dialog: the prompt is followed by a model turn, a user utterance and a second model turn
@@ -552,6 +557,15 @@ def _print_prompt_lengths(args: argparse.Namespace) -> None:
             f"  warning: teacher prompt + {turns} × max_new_tokens (with the user utterance) = {sequence} > "
             f"rollout.micro_batch_tokens = {budget} (such trajectories go on a separate packing row)"
         )
+
+
+def _image_encoder(cfg: JoltConfig) -> Any:
+    """Image encoder of the config's model (`None` — a text-only model): image tokens count in prompt lengths."""
+    from .vision import load_image_encoder
+
+    return load_image_encoder(
+        cfg.model.path, min_tokens=cfg.model.image_min_tokens, max_tokens=cfg.model.image_max_tokens
+    )
 
 
 def cmd_data_validate_corpus(args: argparse.Namespace) -> int:
@@ -627,7 +641,7 @@ def _print_corpus_plan(args: argparse.Namespace) -> None:
     cfg = _load(args)
     tokenizer = load_tokenizer(cfg.model.path, trust_remote_code=cfg.model.trust_remote_code)
     max_tokens = int(cfg.sft.max_tokens)
-    documents, stats = tokenize_records(load_corpora(args.path, "train"), tokenizer, max_tokens)
+    documents, stats = tokenize_records(load_corpora(args.path, "train"), tokenizer, max_tokens, _image_encoder(cfg))
     loss_tokens = sum(doc.loss_tokens for doc in documents)
     total = sum(doc.length for doc in documents)
     plan = SftPlan(documents, max_tokens=max_tokens, rows_per_step=int(cfg.sft.rows_per_step), seed=cfg.run.seed)

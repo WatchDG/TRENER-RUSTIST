@@ -33,6 +33,7 @@ import torch.nn.functional as F
 from safetensors.torch import load_file, save_file
 from torch import nn
 
+from .architectures import LANGUAGE, architecture_of
 from .quant import NF4Linear, base_weight, set_base_weight
 
 if TYPE_CHECKING:  # pragma: no cover - for typing only
@@ -167,6 +168,8 @@ class LoraState:
     double_quant: bool = True
     #: QLoRA: every quantized layer by path (the targets included).
     quantized: dict[str, NF4Linear] = field(default_factory=dict, repr=False)
+    #: Module groups whose layers carry adapters (`lora.modules`).
+    groups: list[str] = field(default_factory=lambda: [LANGUAGE])
 
     @property
     def scale(self) -> float:
@@ -195,6 +198,7 @@ class LoraState:
             "alpha": self.alpha,
             "dropout": self.dropout,
             "targets": self.targets,
+            "modules": self.groups,
             "quantization": self.quantization(),
         }
 
@@ -207,23 +211,30 @@ def apply_lora(model: nn.Module, cfg: LoraConfig, *, device: torch.device | str 
     """Freezes the model and replaces the target `nn.Linear` layers with `LoraLinear`.
 
     `cfg.targets` — short layer names; empty — all linear layers except the output embeddings (`lm_head`).
-    A name that matches no layer is an error.
+    A name that matches no layer is an error. `cfg.modules` — the module groups whose layers are adapted
+    (`trener.architectures`: `language`, `vision`, `projector`); empty — `language` (in a text-only model every
+    layer belongs to it).
 
-    `cfg.quantize == "nf4"` (QLoRA): every linear layer except `lm_head` is quantized on `device` (by default —
-    where its weight is): the targets become `QLoraLinear`, the rest `NF4Linear`.
+    `cfg.quantize == "nf4"` (QLoRA): every linear layer of the `language` group except `lm_head` is quantized on
+    `device` (by default — where its weight is): the targets become `QLoraLinear`, the rest `NF4Linear`. The vision
+    tower and the projector stay in bf16 (their targets become `LoraLinear`).
     """
     if any(isinstance(module, (LoraLayer, NF4Linear)) for module in model.modules()):
         raise ValueError("LoRA is already applied to this model")
     for param in model.parameters():
         param.requires_grad_(False)
 
+    architecture = architecture_of(model)
+    groups = list(cfg.modules) or [LANGUAGE]
+    architecture.check_groups(groups, "lora.modules")
     get_output = getattr(model, "get_output_embeddings", None)
     output = get_output() if callable(get_output) else None
-    candidates = [
+    linear = [
         (name, module)
         for name, module in model.named_modules()
         if isinstance(module, nn.Linear) and module is not output and name
     ]
+    candidates = [(name, module) for name, module in linear if architecture.group_of(name) in groups]
     available = sorted({_short(name) for name, _ in candidates})
     wanted = set(cfg.targets)
     unknown = sorted(wanted - set(available))
@@ -237,13 +248,15 @@ def apply_lora(model: nn.Module, cfg: LoraConfig, *, device: torch.device | str 
     nf4 = {"block_size": int(cfg.quant_block_size), "double_quant": bool(cfg.double_quant), "device": device}
     modules: dict[str, LoraLayer] = {}
     quantized: dict[str, NF4Linear] = {}
-    for name, module in candidates:
-        if name not in selected and not quantize:
+    for name, module in linear:
+        # NF4 only for the language model: the vision tower reads its patchifier's `weight`
+        nf4_layer = quantize and architecture.group_of(name) == LANGUAGE
+        if name not in selected and not nf4_layer:
             continue
         parent_name, _, child = name.rpartition(".")
         parent = model.get_submodule(parent_name) if parent_name else model
         replacement: nn.Module
-        if not quantize:
+        if not nf4_layer:
             replacement = LoraLinear(module, r=cfg.r, alpha=cfg.alpha, dropout=cfg.dropout)
         elif name in selected:
             replacement = QLoraLinear(module, r=cfg.r, alpha=cfg.alpha, dropout=cfg.dropout, **nf4)
@@ -264,6 +277,7 @@ def apply_lora(model: nn.Module, cfg: LoraConfig, *, device: torch.device | str 
         quant_block_size=int(cfg.quant_block_size),
         double_quant=bool(cfg.double_quant),
         quantized=quantized,
+        groups=groups,
     )
 
 

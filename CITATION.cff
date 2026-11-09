@@ -5,8 +5,8 @@ type: software
 authors:
   - family-names: Baranov
     given-names: Grigoriy
-version: 0.8.0
-date-released: "2026-11-05"
+version: 0.9.0
+date-released: "2026-11-09"
 license: Apache-2.0
 repository-code: "https://github.com/WatchDG/TRENER-RUSTIST"
 abstract: >-
