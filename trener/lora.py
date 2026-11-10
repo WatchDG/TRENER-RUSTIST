@@ -471,7 +471,7 @@ def merge_adapter(policy: Policy, tensors: dict[str, torch.Tensor], config: dict
             )
             name = f"{module_name}.weight"
             if name in index:
-                policy.set_master_fp32(index[name], merged)
+                policy.set_weight_fp32(index[name], merged)
             else:
                 set_base_weight(module, merged)
 

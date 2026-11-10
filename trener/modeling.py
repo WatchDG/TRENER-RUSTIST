@@ -5,7 +5,8 @@ model's `config.json`): LFM3 by the checkpoint's code (`trust_remote_code=True`)
 implementation, Llama (MiniCPM5) by `transformers`, LFM3-VL by the checkpoint's code through
 `AutoModelForImageTextToText`; a vision-language model also gets its image encoder (`trener.vision`). The tokenizer
 is loaded with the end of an assistant turn as EOS (`trener.chat_format.load_tokenizer`). `model.trainable` freezes
-the module groups that are not trained (`language`, `vision`, `projector`): they get no master weights. An fp32
+the module groups that are not trained (`language`, `vision`, `projector`): they get no master weights;
+`model.trainable_weights` narrows training to rows, columns, blocks and single weights (`trener.regions`). An fp32
 master copy of the weights is kept alongside it, because the step `lr≈1e-6` is below the bf16 resolution
 (docs/07-usage/08-limitations.md).
 """
@@ -14,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import platform
 import sys
 import warnings
@@ -40,6 +42,7 @@ from .fusion import fuse_model
 from .lora import LoraState, apply_lora
 from .master import merge_master, split_master_
 from .media import MediaEncoder, load_media_encoder
+from .regions import Region, select_regions
 
 _DTYPES: dict[str, torch.dtype] = {
     "bfloat16": torch.bfloat16,
@@ -121,6 +124,9 @@ class Policy:
     master_offload: bool = False
     #: LoRA adapters (`trener.lora`): the base is frozen, the master and the optimizer cover only the adapters.
     lora: LoraState | None = None
+    #: Trained part of each master parameter (`model.trainable_weights`, `trener.regions`), by parameter index:
+    #: `None` (or an empty list) — the whole tensor. The master of a partial parameter has the part's shape.
+    master_regions: list[Region | None] = field(default_factory=list, repr=False)
     #: Media encoders of a model with images or speech (`trener.media`); `None` — a text-only model.
     media: MediaEncoder | None = None
     #: Logit bias of a text answer: −inf at the tokens a text answer never contains (`Architecture.text_suppress`);
@@ -155,27 +161,56 @@ class Policy:
         """Number of parameters with master weights (in both storage modes)."""
         return len(self.master_params)
 
+    def region(self, index: int) -> Region | None:
+        """Trained part of master parameter `index` (`None` — the whole tensor)."""
+        return self.master_regions[index] if self.master_regions else None
+
+    def part(self, index: int, tensor: torch.Tensor) -> torch.Tensor:
+        """The trained part of `tensor` (a tensor of parameter `index`'s shape: its weights, its gradient)."""
+        region = self.region(index)
+        return tensor if region is None else region.take(tensor)
+
     def master_fp32(self, index: int) -> torch.Tensor:
         """fp32 master of parameter `index`: the tensor itself (`fp32`) or an assembly from bf16 and `int16` (`split`).
 
-        In `split` mode a new tensor on the parameter's device is returned.
+        In `split` mode a new tensor on the parameter's device is returned. A partial parameter
+        (`model.trainable_weights`) has a master of its part's shape.
         """
         if self.master_storage == "split":
-            return merge_master(self.master_params[index].data, self.master_low[index])
+            return merge_master(self.part(index, self.master_params[index].data), self.master_low[index])
         return self.master_tensors[index].data
 
     def set_master_fp32(self, index: int, value: torch.Tensor) -> None:
-        """Writes the fp32 master of parameter `index` and synchronizes the model weights with it."""
+        """Writes the fp32 master of parameter `index` (its part's shape) and synchronizes the model weights with it."""
         param = self.master_params[index]
+        region = self.region(index)
         if self.master_storage == "split":
             source = value.to(param.device, dtype=torch.float32).contiguous()
-            low = torch.empty(param.shape, dtype=torch.int16, device=param.device)
-            split_master_(source, param.data, low)
+            low = torch.empty(source.shape, dtype=torch.int16, device=param.device)
+            if region is None:
+                split_master_(source, param.data, low)
+            else:
+                high = torch.empty(source.shape, dtype=torch.bfloat16, device=param.device)
+                split_master_(source, high, low)
+                region.put_(param.data, high)
             self.master_low[index].copy_(low)
             return
         master = self.master_tensors[index]
         master.data.copy_(value.to(master.device, dtype=master.dtype))
-        param.data.copy_(master.data.to(param.dtype))
+        if region is None:
+            param.data.copy_(master.data.to(param.dtype))
+        else:
+            region.put_(param.data, master.data.to(param.dtype))
+
+    def set_weight_fp32(self, index: int, value: torch.Tensor) -> None:
+        """Writes a whole fp32 weight of master parameter `index`: the trained part goes to the master, the rest of
+        the tensor (frozen elements) is rounded into the model weights."""
+        region = self.region(index)
+        if region is not None:
+            param = self.master_params[index]
+            param.data.copy_(value.to(param.device, dtype=param.dtype))
+            value = region.take(value.to(param.device))
+        self.set_master_fp32(index, value)
 
     def reset_decoder(self) -> None:
         """Resets the caches and CUDA graphs of the decode engine (model weights changed outside the optimizer)."""
@@ -300,12 +335,13 @@ def _gpu_info() -> dict[str, Any]:
 
 
 def _build_master_weights(
-    model: Any,
+    model: Any, regions: dict[str, Region | None] | None = None
 ) -> tuple[dict[int, torch.Tensor], list[torch.nn.Parameter], list[torch.nn.Parameter], list[str]]:
     """Creates fp32 master copies of the unique trainable parameters (tied weights are deduplicated).
 
     Master weights are `nn.Parameter`s without a gradient from the model graph: the optimizer works on them,
     and they are copied into the model weights after `step()`. Frozen parameters (the base under LoRA) get none.
+    `regions` — the trained part of a parameter by name (`model.trainable_weights`): its master has the part's shape.
     """
     master_weights: dict[int, torch.Tensor] = {}
     master_params: list[torch.nn.Parameter] = []
@@ -315,7 +351,9 @@ def _build_master_weights(
         key = id(param)
         if key in master_weights or not param.requires_grad:
             continue
-        master = torch.nn.Parameter(param.detach().to(torch.float32).clone(), requires_grad=True)
+        region = (regions or {}).get(name)
+        source = param.detach() if region is None else region.take(param.detach())
+        master = torch.nn.Parameter(source.to(torch.float32).clone(), requires_grad=True)
         # master.grad refers to the model's bf16 gradient: a copy of the gradients in fp32 is not needed,
         # and `grad_dtype=None` allows this gradient type for an fp32 parameter.
         master.grad_dtype = None
@@ -327,12 +365,13 @@ def _build_master_weights(
 
 
 def _build_split_master(
-    model: Any, *, pinned: bool = False
+    model: Any, *, pinned: bool = False, regions: dict[str, Region | None] | None = None
 ) -> tuple[list[torch.nn.Parameter], list[torch.Tensor], list[str]]:
     """Low halves of the master (`int16`, zeros) for the bf16 weights: master = weights + residual.
 
     The fp32 master initially equals the model weights, so the residual is zero. There are no persistent
     fp32 tensors. `pinned=True` — residuals in pinned RAM (memory-saving mode). Frozen parameters get none.
+    `regions` — the trained part of a parameter by name: its residual has the part's shape.
     """
     master_params: list[torch.nn.Parameter] = []
     master_low: list[torch.Tensor] = []
@@ -346,7 +385,9 @@ def _build_split_master(
             raise ValueError(f"optim.master_storage=split requires bf16 weights, parameter {name} has {param.dtype}")
         if not param.data.is_contiguous():
             raise ValueError(f"optim.master_storage=split requires contiguous parameters, {name} is not contiguous")
-        low = torch.zeros(param.shape, dtype=torch.int16, device="cpu" if pinned else param.device)
+        region = (regions or {}).get(name)
+        shape = param.shape if region is None else region.part_shape
+        low = torch.zeros(shape, dtype=torch.int16, device="cpu" if pinned else param.device)
         if pinned:
             low = low.pin_memory()
         master_params.append(param)
@@ -379,6 +420,7 @@ def build_policy(
     lora: LoraConfig | None = None,
     trainable: Sequence[str] = (),
     language_layers: Sequence[str] = (),
+    trainable_weights: Sequence[dict[str, Any]] = (),
     media: MediaEncoder | None = None,
 ) -> Policy:
     """Builds a `Policy` from a ready model and tokenizer.
@@ -392,7 +434,9 @@ def build_policy(
     bf16 weights never occupy it. `trainable` — the module groups trained without LoRA (empty — all); the others
     are frozen before the master is built. `language_layers` — the trained parts of the language model
     (`model.language_layers`, empty — all): without LoRA the rest of it is frozen, with LoRA only the linear layers
-    of the selected decoder layers get adapters. `media` — the media encoders of a model with images or speech.
+    of the selected decoder layers get adapters. `trainable_weights` — rules of `model.trainable_weights`
+    (`trener.regions`, full fine-tuning only): parameters no rule names are frozen, and a partial parameter gets a
+    master of its selected part only. `media` — the media encoders of a model with images or speech.
     """
     if master_storage not in ("fp32", "split"):
         raise ValueError(f"master_storage must be 'fp32' or 'split', got {master_storage!r}")
@@ -405,8 +449,13 @@ def build_policy(
         raise ValueError("model.trainable selects the groups of full fine-tuning; with LoRA use lora.modules")
     architecture = architecture_of(model)
     selection = architecture.select_layers(model, language_layers)
+    if lora is not None and trainable_weights:
+        raise ValueError("model.trainable_weights is full fine-tuning only — LoRA adapts whole linear layers")
+    regions: dict[str, Region | None] = {}
     if lora is None:
         group_parameters = freeze_groups(model, trainable, language_layers)
+        if trainable_weights:
+            regions = select_regions(model, list(trainable_weights))
     else:
         group_parameters = freeze_groups(model, ())
     quantized = lora is not None and lora.quantize != "none"
@@ -424,14 +473,20 @@ def build_policy(
         warnings.warn("master_offload: requires CUDA — memory-saving mode disabled", RuntimeWarning, stacklevel=2)
         offload = False
     master_low: list[torch.Tensor] = []
+    params = dict(model.named_parameters())
+    regions = {name: None if region is None else region.to(params[name].device) for name, region in regions.items()}
     if split:
         master_weights: dict[int, torch.Tensor] = {}
         master_tensors: list[torch.nn.Parameter] = []
-        master_params, master_low, master_names = _build_split_master(model, pinned=offload)
+        master_params, master_low, master_names = _build_split_master(model, pinned=offload, regions=regions)
     else:
         master_weights, master_params, master_tensors, master_names = (
-            _build_master_weights(model) if with_master else ({}, [], [], [])
+            _build_master_weights(model, regions) if with_master else ({}, [], [], [])
         )
+    master_regions = [regions.get(name) for name in master_names]
+    if not any(region is not None for region in master_regions):
+        master_regions = []
+    partial = [region for region in master_regions if region is not None]
     fingerprint = _fingerprint(model_path) if model_path is not None else _fingerprint_from_model(model, tokenizer)
 
     info: dict[str, Any] = {
@@ -449,13 +504,23 @@ def build_policy(
         + (lora_state.n_quantized_parameters() if lora_state is not None else 0),
         "n_trainable_parameters": sum(
             p.numel() for p in {id(p): p for p in model.parameters() if p.requires_grad}.values()
-        ),
+        )
+        - sum(math.prod(region.shape) - region.numel for region in partial),
         "lora": lora_state.info() if lora_state is not None else None,
         "group_parameters": group_parameters,
         "trainable_groups": sorted(
             {architecture.group_of(name) for name, param in model.named_parameters() if param.requires_grad}
         ),
         "language_layers": selection.info() if selection is not None else None,
+        "trainable_weights": (
+            {
+                "tensors": len(regions),
+                "partial_tensors": len(partial),
+                "partial_elements": sum(region.numel for region in partial),
+            }
+            if regions
+            else None
+        ),
         "n_master_tensors": len(master_low) if split else len(master_tensors),
         "master_storage": master_storage if with_master else None,
         "master_offload": offload,
@@ -479,6 +544,7 @@ def build_policy(
         master_low=master_low,
         master_offload=offload,
         lora=lora_state,
+        master_regions=master_regions,
         media=media,
     )
 
@@ -538,6 +604,7 @@ def load_policy(cfg: JoltConfig, *, with_master: bool = True) -> Policy:
         lora=cfg.lora if with_master and cfg.lora.enabled else None,
         trainable=cfg.model.trainable if with_master else (),
         language_layers=cfg.model.language_layers if with_master else (),
+        trainable_weights=cfg.model.trainable_weights if with_master else (),
         media=media,
     )
     policy.set_gradient_checkpointing(

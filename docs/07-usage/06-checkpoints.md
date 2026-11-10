@@ -31,9 +31,11 @@ token counters, and RNG are new (the RNG is set by `run.seed`). `--resume` and `
 are mutually exclusive.
 
 `--resume` restores the optimizer state by position, so it requires the same trained parameters as the checkpoint
-(`model.trainable`, `model.language_layers`); otherwise it stops with an error. `--init-from` accepts another set:
-the fp32 master of a parameter trained in both runs is restored by name, a newly trained one starts from the loaded
-weights.
+(`model.trainable`, `model.language_layers`) and the same elements of them (`model.trainable_weights`; a checkpoint
+stores the selection beside the master in `master.safetensors`, `region.<name>.rows|cols|pairs`); otherwise it stops
+with an error. `--init-from` accepts another set: the fp32 master of a parameter trained in both runs is restored by
+name, a newly trained one starts from the loaded weights. When the selected elements differ, the saved fp32 part is
+placed over the loaded (bf16) weights and the new selection is taken from the result.
 
 ```powershell
 .venv\Scripts\python.exe -m trener train --config configs/tutor_rust_jolt.yaml `

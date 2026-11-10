@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-11-10
+
+### Added
+
+- `model.trainable_weights`: train selected elements of weight tensors — whole rows, whole columns, single weights
+  `[row, column]` and blocks `[row, column, width, height]`, in any combination per tensor (selections are united,
+  overlaps and nesting allowed), for parameters named by glob patterns; the parameters no rule names are frozen. The
+  fp32 master and the optimizer state cover only the selected elements, the gradient norm counts them only, and the
+  other elements keep their bits. Full fine-tuning only. Checkpoints store the selection in `master.safetensors`
+  (`region.<name>.*`); `--resume` requires the same selection, `--init-from` accepts another one.
+
+### Changed
+
+- `docs/01-jolt.md`: the display formulas are fenced as `math` code blocks instead of `$$`, so they render as
+  formulas on the documentation site.
+
 ## [0.13.0] - 2026-11-10
 
 ### Added
@@ -327,7 +343,8 @@ First release.
 - Tests that need the LFM3 tokenizer are skipped when `models/LFM3-1.7B` is
   absent instead of failing.
 
-[Unreleased]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.13.0...HEAD
+[Unreleased]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.14.0...HEAD
+[0.14.0]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.10.0...v0.11.0

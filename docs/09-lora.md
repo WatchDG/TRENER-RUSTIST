@@ -49,7 +49,8 @@ any field: `--set lora.enabled=true --set lora.r=8 --set "lora.targets=[q_proj, 
 selected decoder layers: `--set model.language_layers=20-23` adapts the targets of layers 20–23 only, `[conv]` — the
 convolution blocks (then `targets: [q_proj]` is an error: no such layer among the selected ones). `embeddings` and
 `norm` are full fine-tuning only. QLoRA quantizes every linear layer of the language model regardless of the
-selection. `env.txt` records the adapted layers in `lora.layers`.
+selection. `env.txt` records the adapted layers in `lora.layers`. `model.trainable_weights` (rows, columns, blocks
+and single weights) is full fine-tuning only: with `lora.enabled` it is a configuration error.
 
 Preset: `configs/smoke_lora_rust_keywords_jolt.yaml` — the smoke run of `smoke_rust_keywords_jolt.yaml` with
 adapters on all linear layers.

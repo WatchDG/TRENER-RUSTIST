@@ -60,6 +60,7 @@ from .losses import policy_gradient_loss
 from .master import merge_master
 from .optim import build_optimizer
 from .prompts import build_prompts
+from .regions import read_regions, region_keys, same_region
 from .rewards import verify
 from .rollout import STUDENT, TEACHER, RolloutStream, Trajectory, _task_id, generate_roles, start_roles
 from .scoring import StreamPacker, deltas, pack_rows, required_passes, score_sequences
@@ -294,6 +295,16 @@ def _tied_aliases(model: Any) -> dict[str, str]:
         else:
             first.setdefault(key, name)
     return aliases
+
+
+def _region_entries(policy: Policy) -> dict[str, torch.Tensor]:
+    """`master.safetensors` entries of the trained parts of partial parameters (`model.trainable_weights`)."""
+    entries: dict[str, torch.Tensor] = {}
+    for index, name in enumerate(policy.master_names):
+        region = policy.region(index)
+        if region is not None:
+            entries.update(region_keys(name, region))
+    return entries
 
 
 def load_model_weights(policy: Policy, checkpoint: str | Path) -> None:
@@ -965,6 +976,7 @@ class Trainer:
                 f"master.{name}": self.policy.master_fp32(index).detach().to("cpu", copy=True)
                 for index, name in enumerate(self.policy.master_names)
             }
+            master_state.update(_region_entries(self.policy))
 
             def snapshot() -> tuple[dict[str, torch.Tensor], dict[str, torch.Tensor]]:
                 return model_state, master_state
@@ -1078,6 +1090,8 @@ class Trainer:
 
         buffers = self._pinned_buffers
         names = list(policy.master_names)
+        regions = [policy.region(index) for index in range(len(names))]
+        region_state = _region_entries(policy)
 
         def collect() -> tuple[dict[str, torch.Tensor], dict[str, torch.Tensor]]:
             event.synchronize()  # the D2H copy is finished (the event is thread-safe, repeated waiting is cheap)
@@ -1088,13 +1102,16 @@ class Trainer:
             }
             if split:
                 master_state = {}
-                for name in names:
+                for name, region in zip(names, regions, strict=True):
                     high = model_state.get(name)
                     if high is None:
                         high = buffers[f"high.{name}"]
+                    if region is not None:  # the master of a partial parameter covers its trained part
+                        high = region.take(high)
                     master_state[f"master.{name}"] = merge_master(high, buffers[f"low.{name}"])
             else:
                 master_state = {f"master.{name}": buffers[f"master.{name}"] for name in names}
+            master_state.update(region_state)
             return model_state, master_state
 
         return collect
@@ -1178,28 +1195,52 @@ class Trainer:
         `resume=True` — the saved master must cover exactly the trained parameters of this run: the optimizer state
         is restored by position, so another `model.trainable`/`model.language_layers` raises `ValueError`.
         """
+        policy = self.policy
         master_file = checkpoint / "master.safetensors"
         state = load_file(str(master_file)) if master_file.exists() else {}
-        if resume and state:
-            saved = {key.removeprefix("master.") for key in state}
-            current = set(self.policy.master_names)
+        masters = {key.removeprefix("master."): value for key, value in state.items() if key.startswith("master.")}
+        shapes = {name: tuple(param.shape) for name, param in policy.model.named_parameters()}
+        saved_regions = read_regions(state, shapes)
+        if resume and masters:
+            saved = set(masters)
+            current = set(policy.master_names)
             if saved != current:
                 raise ValueError(
                     f"checkpoint {checkpoint} trained other parameters ({len(saved - current)} not trained here, "
-                    f"{len(current - saved)} new): resume it with the same model.trainable and "
-                    "model.language_layers, or start from its weights with --init-from"
+                    f"{len(current - saved)} new): resume it with the same model.trainable, model.language_layers "
+                    "and model.trainable_weights, or start from its weights with --init-from"
+                )
+            other = [
+                name
+                for index, name in enumerate(policy.master_names)
+                if not same_region(saved_regions.get(name), policy.region(index))
+            ]
+            if other:
+                raise ValueError(
+                    f"checkpoint {checkpoint} trained other elements of {len(other)} parameters ({other[:3]}): "
+                    "resume it with the same model.trainable_weights, or start from its weights with --init-from"
                 )
 
         if (checkpoint / "model.safetensors").exists() or is_adapter_checkpoint(checkpoint):
-            load_model_weights(self.policy, checkpoint)
+            load_model_weights(policy, checkpoint)
         # master is the source of truth: the model weights are synchronized with it (`set_master_fp32`);
         # without a saved master it follows the loaded weights, or the first step would restore the old ones
-        for index, name in enumerate(self.policy.master_names):
-            key = f"master.{name}"
-            if key in state:
-                self.policy.set_master_fp32(index, state[key])
+        for index, name in enumerate(policy.master_names):
+            param = policy.master_params[index]
+            value = masters.get(name)
+            saved_region, region = saved_regions.get(name), policy.region(index)
+            if value is None:
+                policy.set_master_fp32(index, policy.part(index, param.data).float())
+            elif same_region(saved_region, region):
+                policy.set_master_fp32(index, value)
             else:
-                self.policy.set_master_fp32(index, self.policy.master_params[index].data.float())
+                # another selection of elements (`--init-from`): the saved fp32 part over the loaded weights
+                full = param.data.float()
+                if saved_region is None:
+                    full = value.to(full.device, torch.float32)
+                else:
+                    saved_region.put_(full, value)
+                policy.set_master_fp32(index, full if region is None else region.take(full))
 
     def init_from(self, path: str | Path) -> None:
         """Starts a new run from the checkpoint weights: step 0, optimizer and token counters from scratch.

@@ -73,6 +73,23 @@ class LayerSelection:
         return {"layers": sorted(self.layers), "embeddings": self.embeddings, "norm": self.norm}
 
 
+def parse_range(item: Any, what: str) -> tuple[int, int] | None:
+    """An index `12` or an inclusive range `20-23` as `(first, last)`; `None` — `item` is neither.
+
+    A non-negative integer is an index too. Raises `ValueError` on a range with `first > last`.
+    """
+    if isinstance(item, int) and not isinstance(item, bool):
+        return (item, item) if item >= 0 else None
+    match = _RANGE.fullmatch(str(item).strip())
+    if not match:
+        return None
+    first = int(match.group(1))
+    last = int(match.group(2)) if match.group(2) is not None else first
+    if first > last:
+        raise ValueError(f"{what}: range {str(item).strip()!r} is empty (expected first ≤ last)")
+    return first, last
+
+
 def parse_language_layers(items: Sequence[str], what: str = "model.language_layers") -> list[tuple[int, int] | str]:
     """Syntax of `model.language_layers`: each item is a layer index `12`, an inclusive range `20-23` or a name.
 
@@ -83,13 +100,9 @@ def parse_language_layers(items: Sequence[str], what: str = "model.language_laye
     parsed: list[tuple[int, int] | str] = []
     for raw in items:
         item = str(raw).strip()
-        match = _RANGE.fullmatch(item)
-        if match:
-            first = int(match.group(1))
-            last = int(match.group(2)) if match.group(2) is not None else first
-            if first > last:
-                raise ValueError(f"{what}: range {item!r} is empty (expected first ≤ last)")
-            parsed.append((first, last))
+        bounds = parse_range(item, what)
+        if bounds is not None:
+            parsed.append(bounds)
         elif _NAME.fullmatch(item):
             parsed.append(item)
         else:
@@ -338,6 +351,7 @@ __all__ = [
     "Architecture",
     "LayerSelection",
     "parse_language_layers",
+    "parse_range",
     "resolve_language_layers",
     "text_config",
 ]

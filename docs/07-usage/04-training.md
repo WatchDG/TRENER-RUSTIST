@@ -19,6 +19,7 @@ Useful keys:
 | `--set lora.enabled=true` | train LoRA adapters on a frozen base instead of all weights ([09-lora.md](../09-lora.md)) |
 | `--set lora.quantize=nf4` | QLoRA: together with `lora.enabled=true`, the frozen base in 4-bit NF4 ([09-lora.md §7](../09-lora.md)) |
 | `--set model.language_layers=20-23,norm` | train only the selected parts of the language model, the rest is frozen (below) |
+| `model.trainable_weights` | train only selected rows, columns, blocks and single weights of tensors (below) |
 | `--bench gsm8k` | measure the model on a benchmark of `bench/` at the start, at the end (and every `bench.every` steps); repeatable, shorthand for `--set bench.names=...` ([11-benchmarks.md](../11-benchmarks.md)) |
 | `--set run.profile=true` | additionally write the breakdown of the optimization phase (`forward_backward_time_s`, `optimizer_time_s`) |
 
@@ -45,6 +46,43 @@ an error. Other module groups of a multimodal model are set by `model.trainable`
 the model does not have — when the model loads (the message lists what the model has). `env.txt` records the
 resolved selection (`language_layers`) and `n_trainable_parameters`. In a `sequence` stage quote the override:
 `set: ["model.language_layers=conv,norm"]` — without quotes YAML splits it at the comma.
+
+`model.trainable_weights` narrows training further, down to elements of weight tensors (full fine-tuning only; empty —
+every parameter left by `model.trainable` and `model.language_layers` trains whole). Each rule names parameters and
+selects elements in any combination:
+
+```yaml
+model:
+  language_layers: [20-23]
+  trainable_weights:
+    - params: "*.self_attn.q_proj.weight"  # a name pattern over named_parameters(): * — any characters, ? — one
+      rows: [0-127, 512]                   # whole rows (axis 0): indices and inclusive ranges
+      cols: [7]                            # whole columns (axis 1)
+      weights: [[3, 5], [900, 12]]         # single weights [row, column]; one may be written as [3, 5]
+      blocks: [[64, 64, 16, 8]]            # submatrices [row, column, width, height]
+    - params: "*.feed_forward.w2.weight"
+      blocks: [[0, 0, 256, 32]]            # rows 0–31, columns 0–255
+    - params: "*.operator_norm.weight"     # no selection — the whole tensor
+```
+
+| Rule | Behaviour |
+|---|---|
+| selections of one rule and of several rules naming one parameter | united: overlaps, repeats and nesting are allowed, an element is trained once |
+| a block `[row, column, width, height]` | rows `row … row+height−1`, columns `column … column+width−1` |
+| a one-dimensional parameter (norms, biases) | `rows` only |
+| axes after the second (the convolution kernel `[channels, 1, kernel]`) | always whole: a row of the kernel is a channel with all its taps |
+| a parameter no rule names | frozen |
+| a rule that names no trained parameter, an index out of a tensor | an error at model load, with the parameter's name and shape |
+
+The selected elements of a tensor train as a parameter of their own: the fp32 master and the optimizer state cover
+only them, and the other elements keep their bits. When the selection is a product of rows and columns (rows only,
+columns only, one block, rows × columns) the part is a matrix and Adafactor factors its second moment as for a
+separate matrix; any other mix (rows and columns together, single weights, several blocks) trains as the list of its
+elements with a per-element second moment. The gradient norm (`optim.max_grad_norm`) counts the selected elements
+only; `n_trainable_parameters` in `env.txt` is their number, `trainable_weights` — the counts of partial tensors and
+their elements. Backward still computes the full gradient of a partial tensor: the selection saves optimizer memory
+and the master, not backward time. Overrides take YAML flow syntax:
+`--set 'model.trainable_weights=[{params: "*.q_proj.weight", rows: [0-63]}]'`.
 
 The run directory by default is `runs/<run.name>/` (`run.out_dir` in the config).
 The `Ctrl+C` signal saves the last checkpoint and terminates the run correctly.

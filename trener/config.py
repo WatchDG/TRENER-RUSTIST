@@ -6,6 +6,7 @@ Presets are in ``configs/``.
 
 from __future__ import annotations
 
+import copy
 import math
 import typing
 from dataclasses import dataclass, field, fields
@@ -152,6 +153,12 @@ class ModelConfig:
     #: `lm_head`) and `norm` (the final norm; both — full fine-tuning only). The rest of the language model is frozen;
     #: with LoRA only the linear layers of the selected layers get adapters. Other groups — `trainable`/`lora.modules`.
     language_layers: list[str] = field(default_factory=list)
+    #: Trained elements of the parameters (full fine-tuning only; `trener.regions`); empty — every parameter that
+    #: `trainable` and `language_layers` leave trained, whole. Each rule: `params` — a name pattern (`*` — any
+    #: characters), and any of `rows`/`cols` (indices, ranges `20-23`), `weights` (`[row, column]`), `blocks`
+    #: (`[row, column, width, height]`); selections are united, overlaps allowed; without them — the whole tensor.
+    #: Parameters no rule names are frozen; the master and the optimizer state cover only the selected elements.
+    trainable_weights: list[dict[str, Any]] = field(default_factory=list)
     #: Token budget of one image of a vision-language model (one token — 32×32 pixels, `trener.vision`): the image
     #: is resized so that its token count lies within `[image_min_tokens, image_max_tokens]`.
     image_min_tokens: int = 64
@@ -175,6 +182,7 @@ class ModelConfig:
             "conv_kernel": self.conv_kernel,
             "trainable": list(self.trainable),
             "language_layers": list(self.language_layers),
+            "trainable_weights": copy.deepcopy(self.trainable_weights),
             "image_min_tokens": self.image_min_tokens,
             "image_max_tokens": self.image_max_tokens,
             "audio_max_seconds": self.audio_max_seconds,
@@ -609,6 +617,14 @@ def _coerce_value(where: str, target: Any, value: Any, *, from_text: bool = Fals
     if typing.get_origin(target) is list:
         # list of paths or names: a single value becomes a list of one element
         (item_type,) = typing.get_args(target)
+        if typing.get_origin(item_type) is dict:
+            # rules of `model.trainable_weights`; `--set` takes them in YAML flow style: `[{params: "*.q_proj.weight"}]`
+            from .regions import parse_weight_rules
+
+            try:
+                return parse_weight_rules(value, where)
+            except ValueError as exc:
+                raise ConfigError(str(exc)) from exc
         items = value if isinstance(value, list) else [value]
         if from_text and isinstance(value, str):
             # `--set bench.names=gsm8k,other` — several values separated by commas
@@ -717,6 +733,7 @@ def validate_config(cfg: JoltConfig) -> JoltConfig:
         raise ConfigError("model.checkpoint_free_layers requires model.gradient_checkpointing: true")
     _check_groups("model.trainable", cfg.model.trainable)
     _validate_language_layers(cfg)
+    _validate_trainable_weights(cfg)
     if not 0 < cfg.model.image_min_tokens <= cfg.model.image_max_tokens:
         raise ConfigError(
             "model.image_min_tokens and model.image_max_tokens must satisfy 0 < min ≤ max, got "
@@ -877,6 +894,23 @@ def _validate_language_layers(cfg: JoltConfig) -> None:
         raise ConfigError(
             f"model.language_layers selects the trained language layers, but model.trainable {cfg.model.trainable} "
             "has no language group"
+        )
+
+
+def _validate_trainable_weights(cfg: JoltConfig) -> None:
+    """Syntax of `model.trainable_weights` (bounds — against the model); full fine-tuning only."""
+    from .regions import parse_weight_rules
+
+    if not cfg.model.trainable_weights:
+        return
+    try:
+        cfg.model.trainable_weights = parse_weight_rules(cfg.model.trainable_weights)
+    except ValueError as exc:
+        raise ConfigError(str(exc)) from exc
+    if cfg.lora.enabled:
+        raise ConfigError(
+            "model.trainable_weights is full fine-tuning only — with LoRA select the adapted layers with "
+            "model.language_layers and lora.targets"
         )
 
 

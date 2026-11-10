@@ -95,7 +95,9 @@ parameters per group. A text-only model has a single group `language`; another g
 `model.language_layers` ([§7.4](07-usage/04-training.md)) narrows the `language` group to selected decoder layers,
 layer types, `embeddings` and `norm`: `trainable: [language, vision]` with `language_layers: [20-23]` trains the whole
 vision tower and the last four language layers. The vision tower's own `layers` and `embedding_norm` are never
-selected by it. `model.trainable` must contain `language` (or be empty).
+selected by it. `model.trainable` must contain `language` (or be empty). `model.trainable_weights`
+([§7.4](07-usage/04-training.md)) then picks rows, columns, blocks and single weights among the parameters of every
+trained group, vision tower included (`params: "model.vision_tower.*"`).
 
 `optim.vision_lr_scale` and `optim.projector_lr_scale` multiply the learning rate of their group (the schedule and
 the warmup are common); `> 0`, freezing is `model.trainable`. Adafactor applies the multiplier per parameter,

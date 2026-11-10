@@ -270,7 +270,7 @@ def test_resume_requires_the_same_trained_parameters(tmp_path: Path, tokenizer: 
 
     for items in (["1", NORM], []):
         other = _full_policy(tokenizer, items)
-        with pytest.raises(ValueError, match="same model.trainable and model.language_layers"):
+        with pytest.raises(ValueError, match="same model.trainable, model.language_layers"):
             Trainer(cfg, other, RunArtifacts(tmp_path / "other")).resume(checkpoint)
 
     # --init-from: masters by name, the rest follows the loaded weights

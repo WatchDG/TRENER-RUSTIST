@@ -51,6 +51,7 @@ ENV_KEYS = (
     "n_parameters",
     "n_trainable_parameters",
     "language_layers",
+    "trainable_weights",
     "lora",
     "attn_implementation",
     "gpu_name",

@@ -15,6 +15,10 @@ Adafactor runs through `trener.adafactor.adafactor_step` (bitwise equal to
   (`trener.master`). During the step of one parameter a temporary fp32 buffer is assembled, and then
   the result is split back. With `master_offload` the low halves live in pinned RAM and are streamed
   over the bus to the GPU one parameter at a time (streaming step, double buffer).
+
+A partial parameter (`model.trainable_weights`, `trener.regions`) steps its trained part only: once backward is done,
+the part is taken from its full gradient (the gradient norm counts the part only), and the step writes the result
+back into the selected elements; the other elements keep their bits.
 """
 
 from __future__ import annotations
@@ -56,6 +60,39 @@ class OptimizerHandle:
     transfer_s: float = 0.0
     #: Traverse the parameters in reverse order (checks that the double buffer does not mix parameters).
     reverse_order: bool = False
+    #: Gradients of the trained parts of partial parameters (`model.trainable_weights`) by parameter index: taken
+    #: from the full gradient once backward is done (`_gather_part_grads`), which is then released.
+    part_grads: dict[int, torch.Tensor] = field(default_factory=dict)
+
+    def _gather_part_grads(self) -> None:
+        """Moves the gradient of each partial parameter into `part_grads` (its trained part only)."""
+        policy = self.policy
+        for index, region in enumerate(policy.master_regions):
+            if region is None:
+                continue
+            param = policy.master_params[index]
+            if param.grad is None:
+                continue
+            part = region.take(param.grad)
+            previous = self.part_grads.get(index)
+            self.part_grads[index] = part if previous is None else previous.add_(part)
+            param.grad = None
+
+    def _grad(self, index: int) -> torch.Tensor | None:
+        """Gradient of master parameter `index` in its master's shape (after `_gather_part_grads`)."""
+        if self.policy.region(index) is not None:
+            return self.part_grads.get(index)
+        return self.policy.master_params[index].grad
+
+    def _release_grad(self, index: int) -> None:
+        self.policy.master_params[index].grad = None
+        self.part_grads.pop(index, None)
+
+    def _all_grads(self) -> list[torch.Tensor]:
+        """Every gradient the step uses: the model's (whole parameters) and the trained parts of partial ones."""
+        self._gather_part_grads()
+        grads = [param.grad for param in self.policy.model.parameters() if param.grad is not None]
+        return grads + list(self.part_grads.values())
 
     def _step_order(self) -> list[int]:
         """Order in which parameters are traversed in a step: from small to large (embeddings last).
@@ -64,8 +101,8 @@ class OptimizerHandle:
         parameter goes last, the gradients of the others have already been released, and the memory
         peak is lower. The parameters are independent, so the order does not affect the result.
         """
-        params = self.policy.master_params
-        order = sorted((i for i, p in enumerate(params) if p.grad is not None), key=lambda i: params[i].numel())
+        grads = {index: self._grad(index) for index in range(self.policy.n_master)}
+        order = sorted((i for i, grad in grads.items() if grad is not None), key=lambda i: grads[i].numel())
         if self.reverse_order:
             order.reverse()
         return order
@@ -76,19 +113,21 @@ class OptimizerHandle:
             param.grad = None
         for master in self.master_parameters:
             master.grad = None
+        self.part_grads.clear()
 
     def link_grads(self) -> None:
         """Links the model gradients to the master parameters (without copying)."""
-        for param, master in zip(self.policy.master_params, self.master_parameters, strict=True):
-            master.grad = param.grad
+        self._gather_part_grads()
+        for index, master in enumerate(self.master_parameters):
+            master.grad = self._grad(index)
 
     def grad_total_norm(self) -> float:
         """Euclidean norm of the model gradients, computed in fp32.
 
         The sum of squares is accumulated on the device: one GPU synchronization per step,
-        not one per chunk of each parameter.
+        not one per chunk of each parameter. A partial parameter counts with its trained part only.
         """
-        grads = [param.grad for param in self.policy.model.parameters() if param.grad is not None]
+        grads = self._all_grads()
         if not grads:
             return 0.0
         by_device: dict[torch.device, list[torch.Tensor]] = {}
@@ -118,7 +157,7 @@ class OptimizerHandle:
         else:
             scale = grad_scale * min(1.0, max_norm / (norm + 1e-6))
         if scale != 1.0:
-            grads = [param.grad for param in self.policy.model.parameters() if param.grad is not None]
+            grads = self._all_grads()
             if grads:
                 torch._foreach_mul_(grads, scale)
         return norm
@@ -126,6 +165,7 @@ class OptimizerHandle:
     def step(self) -> None:
         """One update of the shared parameters: master → bf16 model weights; the gradients are released."""
         self.transfer_s = 0.0
+        self._gather_part_grads()
         if self.policy.master_storage == "split":
             self._step_split()
         elif isinstance(self.optimizer, FunctionalAdafactor):
@@ -139,9 +179,8 @@ class OptimizerHandle:
     def _step_adafactor_fp32(self) -> None:
         """Adafactor over the fp32 master tensors; a parameter's gradient is released right after its step."""
         for index in self._step_order():
-            param, master = self.policy.master_params[index], self.master_parameters[index]
-            self.optimizer.step_param(index, master.data, param.grad)
-            param.grad = None
+            self.optimizer.step_param(index, self.master_parameters[index].data, self._grad(index))
+            self._release_grad(index)
         self.sync_model_from_master()
 
     def _step_split(self) -> None:
@@ -152,13 +191,16 @@ class OptimizerHandle:
         with torch.no_grad():
             for index in self._step_order():
                 param = self.policy.master_params[index]
-                grad = param.grad
+                region = self.policy.region(index)
+                high = param.data if region is None else region.take(param.data)
                 low = self.policy.master_low[index]
-                buffer = torch.empty(param.shape, dtype=torch.float32, device=param.device)
-                merge_master_(param.data, low, buffer)
-                self.optimizer.step_param(index, buffer, grad)
-                split_master_(buffer, param.data, low)
-                param.grad = None
+                buffer = torch.empty(high.shape, dtype=torch.float32, device=param.device)
+                merge_master_(high, low, buffer)
+                self.optimizer.step_param(index, buffer, self._grad(index))
+                split_master_(buffer, high, low)
+                if region is not None:
+                    region.put_(param.data, high)
+                self._release_grad(index)
                 del buffer
 
     def _offload_streams(self) -> tuple[Any, Any]:
@@ -202,11 +244,15 @@ class OptimizerHandle:
                 main.wait_event(ready)
                 low.record_stream(main)
                 param = policy.master_params[index]
-                buffer = torch.empty(param.shape, dtype=torch.float32, device=device)
-                merge_master_(param.data, low, buffer)
-                self.optimizer.step_param(index, buffer, param.grad)
-                split_master_(buffer, param.data, low)
-                param.grad = None
+                region = policy.region(index)
+                high = param.data if region is None else region.take(param.data)
+                buffer = torch.empty(high.shape, dtype=torch.float32, device=device)
+                merge_master_(high, low, buffer)
+                self.optimizer.step_param(index, buffer, self._grad(index))
+                split_master_(buffer, high, low)
+                if region is not None:
+                    region.put_(param.data, high)
+                self._release_grad(index)
                 del buffer
                 done = torch.cuda.Event()
                 done.record(main)
@@ -224,10 +270,20 @@ class OptimizerHandle:
         to the element-wise `param.data.copy_(master.data)`.
         """
         with torch.no_grad():
-            targets = [param.data for param in self.policy.master_params]
-            sources = [master.data for master in self.master_parameters]
-            if len(targets) != len(sources):
+            policy = self.policy
+            if len(policy.master_params) != len(self.master_parameters):
                 raise ValueError("number of model parameters and master weights does not match")
+            targets: list[torch.Tensor] = []
+            sources: list[torch.Tensor] = []
+            for index, (param, master) in enumerate(zip(policy.master_params, self.master_parameters, strict=True)):
+                region = policy.region(index)
+                if region is None:
+                    targets.append(param.data)
+                    sources.append(master.data)
+                else:  # a partial parameter: only its trained part follows the master
+                    region.put_(param.data, master.data.to(param.dtype))
+            if not targets:
+                return
             try:
                 torch._foreach_copy_(targets, sources)
             except (RuntimeError, TypeError):  # pragma: no cover - depends on the torch version
