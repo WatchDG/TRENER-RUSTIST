@@ -17,7 +17,7 @@ is not selective (§7): it removes refusals in general, not only on the topic of
 ```yaml
 method: abliterate
 rollout:
-  engine: static               # generation engine of the refusal check (the `rollout` section, §7.4 of 07-usage.md)
+  engine: static               # generation engine of the refusal check (the `rollout` section, docs/07-usage/04-training.md)
 abliteration:
   prompts: datasets/abliteration/example-0001
   direction_split: train
@@ -299,5 +299,5 @@ The level 0 direction (the embedding output) is zero: the last prompt token is t
 
 ## Next
 
-- Running the pipeline, `--init-from` and `sequence` → [07-usage.md](07-usage.md)
+- Running the pipeline, `--init-from` and `sequence` → [07-usage/](07-usage/README.md)
 - Training data formats → [06-data.md](06-data.md)

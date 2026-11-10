@@ -13,7 +13,7 @@ Documentation for the post-training pipeline implementing **JOLT** and **JOLT+**
 | [04-implementation.md](04-implementation.md) | Pipeline requirements: components, configuration, privileged information formats, correctness invariants, testbed readiness criteria |
 | [05-references.md](05-references.md) | Primary sources, related work, benchmarks and models |
 | [06-data.md](06-data.md) | Training data: task set catalog, `question`/`answer`/`reason`/`answer_type` records, answer checking, teacher and student prompts, manifest, `data` commands |
-| [07-usage.md](07-usage.md) | Running the pipeline: requirements and environment, presets, training and evaluation, artifact catalog and metrics, recovery from a checkpoint, known limitations |
+| [07-usage/](07-usage/README.md) | Running the pipeline, one file per section 7.1–7.13: requirements and environment, presets, training and evaluation, artifact catalog and metrics, recovery from a checkpoint, known limitations, measurements |
 | [08-sft.md](08-sft.md) | The `sft` stage before JOLT: the `jolt-corpus` documentation corpus, builder from rustdoc JSON, repetition, configuration, coverage and NLL |
 | [09-lora.md](09-lora.md) | Optional LoRA and QLoRA: frozen base (QLoRA — in 4-bit NF4) and low-rank adapters for any method, checkpoint format, fine-tuning and continuing an adapter (`--init-from`, `--resume`, `sequence`), PEFT compatibility |
 | [10-abliteration.md](10-abliteration.md) | `method: abliterate` for experiments: the refusal direction from contrast `bad`/`good` prompts (`abliteration-prompts` format), its ablation from the output projections with the LFM3 sandwich-norm correction, Optuna search on refusal rate and KL, export of the model |

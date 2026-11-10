@@ -7,7 +7,7 @@ implementation, Llama (MiniCPM5) by `transformers`, LFM3-VL by the checkpoint's 
 is loaded with the end of an assistant turn as EOS (`trener.chat_format.load_tokenizer`). `model.trainable` freezes
 the module groups that are not trained (`language`, `vision`, `projector`): they get no master weights. An fp32
 master copy of the weights is kept alongside it, because the step `lr≈1e-6` is below the bf16 resolution
-(docs/07-usage.md §7.8).
+(docs/07-usage/08-limitations.md).
 """
 
 from __future__ import annotations
@@ -26,6 +26,7 @@ import torch
 import transformers
 
 from .architectures import (
+    LANGUAGE,
     MEDIA_GROUPS,
     architecture_names,
     architecture_of,
@@ -230,18 +231,25 @@ def _set_use_cache(model: Any, enabled: bool) -> None:
         text.use_cache = enabled
 
 
-def freeze_groups(model: Any, trainable: Sequence[str]) -> dict[str, int]:
+def freeze_groups(model: Any, trainable: Sequence[str], language_layers: Sequence[str] = ()) -> dict[str, int]:
     """Freezes the parameters outside the module groups `trainable` (empty — every group trains).
 
+    `language_layers` — the trained parts of the language model (`model.language_layers`: layer indices, ranges,
+    layer types, `embeddings`, `norm`; empty — all of it): the other language parameters are frozen too. Raises
+    `ValueError` on a group the model lacks or an item that does not resolve against the model.
     Returns the number of parameters per group (tied weights counted once).
     """
     architecture = architecture_of(model)
     architecture.check_groups(list(trainable), "model.trainable")
+    selection = architecture.select_layers(model, language_layers)
+    selected = architecture.selected_language(model, selection) if selection is not None else None
     counts: dict[str, int] = dict.fromkeys(architecture.module_groups, 0)
     for name, param in model.named_parameters():
         group = architecture.group_of(name)
         counts[group] += param.numel()
         if trainable and group not in trainable:
+            param.requires_grad_(False)
+        elif selected is not None and group == LANGUAGE and name not in selected:
             param.requires_grad_(False)
     return counts
 
@@ -370,6 +378,7 @@ def build_policy(
     master_offload: bool = False,
     lora: LoraConfig | None = None,
     trainable: Sequence[str] = (),
+    language_layers: Sequence[str] = (),
     media: MediaEncoder | None = None,
 ) -> Policy:
     """Builds a `Policy` from a ready model and tokenizer.
@@ -381,7 +390,9 @@ def build_policy(
     (`trener.lora.apply_lora`) before the master is built: the master covers only the adapters. With
     `lora.quantize` (QLoRA) the linear layers are quantized on `device` before the model moves there, so their
     bf16 weights never occupy it. `trainable` — the module groups trained without LoRA (empty — all); the others
-    are frozen before the master is built. `media` — the media encoders of a model with images or speech.
+    are frozen before the master is built. `language_layers` — the trained parts of the language model
+    (`model.language_layers`, empty — all): without LoRA the rest of it is frozen, with LoRA only the linear layers
+    of the selected decoder layers get adapters. `media` — the media encoders of a model with images or speech.
     """
     if master_storage not in ("fp32", "split"):
         raise ValueError(f"master_storage must be 'fp32' or 'split', got {master_storage!r}")
@@ -393,13 +404,17 @@ def build_policy(
     if lora is not None and trainable:
         raise ValueError("model.trainable selects the groups of full fine-tuning; with LoRA use lora.modules")
     architecture = architecture_of(model)
-    group_parameters = freeze_groups(model, () if lora is not None else trainable)
+    selection = architecture.select_layers(model, language_layers)
+    if lora is None:
+        group_parameters = freeze_groups(model, trainable, language_layers)
+    else:
+        group_parameters = freeze_groups(model, ())
     quantized = lora is not None and lora.quantize != "none"
-    lora_state = apply_lora(model, lora, device=device) if quantized else None
+    lora_state = apply_lora(model, lora, device=device, language_layers=language_layers) if quantized else None
     model.to(device)
     _set_use_cache(model, True)
     if lora is not None and not quantized:
-        lora_state = apply_lora(model, lora)
+        lora_state = apply_lora(model, lora, language_layers=language_layers)
     # `sdpa` → `jolt_sdpa`: same formula, faster packing and decoding; the vision tower keeps its own attention
     use_jolt_attention(model, skip=architecture.prefixes(MEDIA_GROUPS))
 
@@ -440,6 +455,7 @@ def build_policy(
         "trainable_groups": sorted(
             {architecture.group_of(name) for name, param in model.named_parameters() if param.requires_grad}
         ),
+        "language_layers": selection.info() if selection is not None else None,
         "n_master_tensors": len(master_low) if split else len(master_tensors),
         "master_storage": master_storage if with_master else None,
         "master_offload": offload,
@@ -521,6 +537,7 @@ def load_policy(cfg: JoltConfig, *, with_master: bool = True) -> Policy:
         master_offload=_offload_available(cfg, device),
         lora=cfg.lora if with_master and cfg.lora.enabled else None,
         trainable=cfg.model.trainable if with_master else (),
+        language_layers=cfg.model.language_layers if with_master else (),
         media=media,
     )
     policy.set_gradient_checkpointing(

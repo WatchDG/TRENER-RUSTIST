@@ -14,6 +14,7 @@ ARCHITECTURE = Architecture(
     name="Lfm3ForCausalLM",
     projections={"operator": ("conv.out_proj", "self_attn.o_proj"), "mlp": ("feed_forward.w2",)},
     post_norms={"operator": "post_operator_norm", "mlp": "post_ffn_norm"},
+    norm_path="model.embedding_norm",
 )
 
 

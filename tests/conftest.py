@@ -184,16 +184,13 @@ def sample_tasks() -> list[Any]:
     ]
 
 
-@pytest.fixture(scope="session")
-def tiny_lfm3_policy(tokenizer: Any) -> Any:
-    """Small random model of the LFM3 architecture (conv + full + sliding attention).
+def make_tiny_lfm3_model(seed: int = 0) -> Any:
+    """Small random model of the LFM3 architecture: the checkpoint's configuration scaled down to 6 layers.
 
-    Checks the hybrid cache, the convolution window, and the isolation of packed documents without a
-    real checkpoint: the configuration is taken from LFM3 and scaled down.
+    Layer types `conv, conv, full_attention, conv, sliding_attention, conv`; tied embeddings, fp32.
     """
     import torch
     from transformers import AutoConfig, AutoModelForCausalLM
-    from trener.modeling import build_policy
 
     try:
         config = AutoConfig.from_pretrained(str(MODEL_PATH), trust_remote_code=True)
@@ -207,8 +204,27 @@ def tiny_lfm3_policy(tokenizer: Any) -> Any:
     config.layer_types = ["conv", "conv", "full_attention", "conv", "sliding_attention", "conv"]
     config.num_hidden_layers = 6
     config.sliding_window = 32
-    torch.manual_seed(0)
-    model = AutoModelForCausalLM.from_config(config, trust_remote_code=True, dtype=torch.float32)
+    torch.manual_seed(seed)
+    return AutoModelForCausalLM.from_config(config, trust_remote_code=True, dtype=torch.float32)
+
+
+@pytest.fixture(scope="session")
+def lfm3_model_factory() -> Any:
+    """`make_tiny_lfm3_model`: a fresh small LFM3 model per call (tests that change weights or freeze layers)."""
+    return make_tiny_lfm3_model
+
+
+@pytest.fixture(scope="session")
+def tiny_lfm3_policy(tokenizer: Any) -> Any:
+    """Small random model of the LFM3 architecture (conv + full + sliding attention).
+
+    Checks the hybrid cache, the convolution window, and the isolation of packed documents without a
+    real checkpoint: the configuration is taken from LFM3 and scaled down.
+    """
+    import torch
+    from trener.modeling import build_policy
+
+    model = make_tiny_lfm3_model()
     return build_policy(model, tokenizer, device=torch.device("cpu"), dtype="float32", with_master=False)
 
 

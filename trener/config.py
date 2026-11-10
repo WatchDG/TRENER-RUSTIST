@@ -146,6 +146,12 @@ class ModelConfig:
     #: Module groups trained without LoRA (`language`, `vision`, `projector` — `trener.architectures`); empty — all
     #: groups of the model. The other groups are frozen and get no master weights.
     trainable: list[str] = field(default_factory=list)
+    #: Trained parts of the language model (full fine-tuning and LoRA); empty — the whole `language` group. Items: a
+    #: decoder-layer index from 0 (`12`), an inclusive range (`20-23`), a layer type of the model (`conv`,
+    #: `full_attention`, `sliding_attention` — every layer of that type), `embeddings` (token embeddings, tied with
+    #: `lm_head`) and `norm` (the final norm; both — full fine-tuning only). The rest of the language model is frozen;
+    #: with LoRA only the linear layers of the selected layers get adapters. Other groups — `trainable`/`lora.modules`.
+    language_layers: list[str] = field(default_factory=list)
     #: Token budget of one image of a vision-language model (one token — 32×32 pixels, `trener.vision`): the image
     #: is resized so that its token count lies within `[image_min_tokens, image_max_tokens]`.
     image_min_tokens: int = 64
@@ -168,6 +174,7 @@ class ModelConfig:
             "checkpoint_free_layers": self.checkpoint_free_layers,
             "conv_kernel": self.conv_kernel,
             "trainable": list(self.trainable),
+            "language_layers": list(self.language_layers),
             "image_min_tokens": self.image_min_tokens,
             "image_max_tokens": self.image_max_tokens,
             "audio_max_seconds": self.audio_max_seconds,
@@ -606,6 +613,9 @@ def _coerce_value(where: str, target: Any, value: Any, *, from_text: bool = Fals
         if from_text and isinstance(value, str):
             # `--set bench.names=gsm8k,other` — several values separated by commas
             items = [item.strip() for item in value.split(",")]
+        if item_type is str:
+            # `language_layers: [12, 20-23]` — YAML reads a bare index as a number
+            items = [str(item) if isinstance(item, int) and not isinstance(item, bool) else item for item in items]
         if all(isinstance(item, (str, Path)) and str(item).strip() for item in items):
             return [item_type(str(item)) for item in items]
     elif target is Path:
@@ -706,6 +716,7 @@ def validate_config(cfg: JoltConfig) -> JoltConfig:
     if cfg.model.checkpoint_free_layers and not cfg.model.gradient_checkpointing:
         raise ConfigError("model.checkpoint_free_layers requires model.gradient_checkpointing: true")
     _check_groups("model.trainable", cfg.model.trainable)
+    _validate_language_layers(cfg)
     if not 0 < cfg.model.image_min_tokens <= cfg.model.image_max_tokens:
         raise ConfigError(
             "model.image_min_tokens and model.image_max_tokens must satisfy 0 < min ≤ max, got "
@@ -837,6 +848,36 @@ def _check_groups(key: str, groups: list[str]) -> None:
         raise ConfigError(f"{key}: unknown module groups {unknown}; allowed: {list(MODULE_GROUPS)}")
     if len(set(groups)) != len(groups):
         raise ConfigError(f"{key} contains duplicates: {groups}")
+
+
+def _validate_language_layers(cfg: JoltConfig) -> None:
+    """Syntax of `model.language_layers`; the language group must train (layers and types — against the model)."""
+    from .architectures.base import LANGUAGE, LANGUAGE_PARTS, parse_language_layers
+
+    items = cfg.model.language_layers
+    if not items:
+        return
+    try:
+        parsed = parse_language_layers(items)
+    except ValueError as exc:
+        raise ConfigError(str(exc)) from exc
+    if cfg.lora.enabled:
+        if cfg.lora.modules and LANGUAGE not in cfg.lora.modules:
+            raise ConfigError(
+                f"model.language_layers selects the adapted language layers, but lora.modules {cfg.lora.modules} "
+                "has no language group"
+            )
+        parts = [item for item in parsed if item in LANGUAGE_PARTS]
+        if parts:
+            raise ConfigError(
+                f"model.language_layers: {parts} are full fine-tuning only — LoRA adapts the linear layers of the "
+                "decoder layers"
+            )
+    elif cfg.model.trainable and LANGUAGE not in cfg.model.trainable:
+        raise ConfigError(
+            f"model.language_layers selects the trained language layers, but model.trainable {cfg.model.trainable} "
+            "has no language group"
+        )
 
 
 def _validate_lora(cfg: JoltConfig) -> None:

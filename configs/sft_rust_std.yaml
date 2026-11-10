@@ -8,7 +8,7 @@ run:
   seed: 0
   out_dir: runs
   checkpoint_every_epochs: 1
-  release_cache: false   # step −4%; with the fused head the reserve stays at ≈ 18 GB (docs/07-usage.md §7.14)
+  release_cache: false   # step −4%; with the fused head the reserve stays at ≈ 18 GB (docs/07-usage/ §7.14)
   pinned_checkpoint: true
 method: sft
 model:
@@ -18,7 +18,7 @@ model:
   attn_implementation: sdpa
   gradient_checkpointing: true
   compile_kernels: true
-  checkpoint_free_layers: 12  # the last 12 of 24 layers are not recomputed in backward (docs/07-usage.md §7.13, §7.14)
+  checkpoint_free_layers: 12  # the last 12 of 24 layers are not recomputed in backward (docs/07-usage/13-speedups.md, §7.14)
   conv_kernel: true           # Triton short convolution with gradients instead of unfold + einsum (§7.14)
 sft:
   corpus: datasets/rust-docs/rust-std-docs-0001

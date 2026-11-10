@@ -45,6 +45,12 @@ LFM3 layer names: `q_proj`, `k_proj`, `v_proj`, `o_proj`, `gate_proj` (attention
 (`lora.targets: no nn.Linear layers named […]`, the message lists the available ones). Overrides work as for
 any field: `--set lora.enabled=true --set lora.r=8 --set "lora.targets=[q_proj, v_proj, w1, w2, w3]"`.
 
+`model.language_layers` ([§7.4](07-usage/04-training.md)) restricts the adapters of the language model to the
+selected decoder layers: `--set model.language_layers=20-23` adapts the targets of layers 20–23 only, `[conv]` — the
+convolution blocks (then `targets: [q_proj]` is an error: no such layer among the selected ones). `embeddings` and
+`norm` are full fine-tuning only. QLoRA quantizes every linear layer of the language model regardless of the
+selection. `env.txt` records the adapted layers in `lora.layers`.
+
 Preset: `configs/smoke_lora_rust_keywords_jolt.yaml` — the smoke run of `smoke_rust_keywords_jolt.yaml` with
 adapters on all linear layers.
 
@@ -84,7 +90,7 @@ with `optim.master_storage: split`): peak VRAM 11.24 → 4.51 GB, decode step 6.
 | File | Every checkpoint | Final checkpoint |
 |---|---|---|
 | `adapter_model.safetensors` | adapter in fp32 (from the master), PEFT keys `base_model.model.<module>.lora_A.weight` | yes |
-| `adapter_config.json` | PEFT format: `peft_type: LORA`, `r`, `lora_alpha`, `lora_dropout`, `target_modules`, `base_model_name_or_path` | yes |
+| `adapter_config.json` | PEFT format: `peft_type: LORA`, `r`, `lora_alpha`, `lora_dropout`, `target_modules`, `base_model_name_or_path`; with `model.language_layers` and adapters of the language model only — also `layers_to_transform`, `layers_pattern: layers` | yes |
 | `lora_base.json` | the weights the adapter was trained on top of: `base_model`, `base_fingerprint`, `base_checkpoint`; their storage in the run: `base_quantization` (`null`, or NF4 parameters, §7) | yes |
 | `optimizer.pt`, `trainer_state.pt`, `config.json` | as in a full run | yes |
 | `model.safetensors` | — | bf16 weights with the adapter merged into the base |
@@ -102,7 +108,7 @@ The base checkpoint must therefore stay on disk while the intermediate checkpoin
 |---|---|---|
 | `lora.enabled` | none | adapters on top of `model.path` |
 | `lora.enabled`, `--init-from` | full | its weights become the frozen base, the adapter starts from scratch (`base_checkpoint` = this checkpoint) |
-| `lora.enabled`, `--init-from` | LoRA | the same adapter continues on top of the same base: its weights are loaded, step 0, a new optimizer; `r`, `alpha` and `targets` must match |
+| `lora.enabled`, `--init-from` | LoRA | the same adapter continues on top of the same base: its weights are loaded, step 0, a new optimizer; `r`, `alpha`, `targets`, the adapted groups and layers (`model.language_layers`) must match |
 | `lora.enabled` + `lora.merge_init`, `--init-from` | LoRA | its adapter is merged into the base, a new adapter starts from scratch (a stack of adapters) |
 | without LoRA, `--init-from` | LoRA | full training from the merged weights; the fp32 master follows the loaded weights |
 | `--resume` | LoRA | requires `lora.enabled`: the base from `lora_base.json`, the adapter, the optimizer, the step, the RNG |
@@ -124,7 +130,8 @@ for QLoRA as well (§7.4).
 
 In `sequence` a stage with `set: [lora.enabled=true]` takes the previous stage's final checkpoint like any
 `--init-from`: after a full stage it becomes the base, after a LoRA stage the adapter continues (or is merged with
-`lora.merge_init=true`).
+`lora.merge_init=true`). A LoRA stage that adapts other layers than the previous LoRA stage
+(`model.language_layers`) needs `lora.merge_init=true`.
 
 ## 6. Using the adapter outside trener
 
@@ -226,5 +233,5 @@ quantization of the scales differs.
 
 ## Next
 
-- Running the pipeline, checkpoints and `sequence` → [07-usage.md](07-usage.md)
+- Running the pipeline, checkpoints and `sequence` → [07-usage/](07-usage/README.md)
 - The `sft` stage → [08-sft.md](08-sft.md)

@@ -4,7 +4,7 @@ Run artifacts are self-contained: the model, config and environment are recorded
 logs and checkpoints are written to the run directory, and the curves and the
 summary table are rebuilt from it.
 
-Directory structure (docs/07-usage.md §7.5):
+Directory structure (docs/07-usage/05-run-directory.md):
 
 ```
 config.yaml            # full configuration snapshot
@@ -50,6 +50,7 @@ ENV_KEYS = (
     "architecture",
     "n_parameters",
     "n_trainable_parameters",
+    "language_layers",
     "lora",
     "attn_implementation",
     "gpu_name",

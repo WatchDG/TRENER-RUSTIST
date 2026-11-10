@@ -37,6 +37,7 @@ ARCHITECTURE = Architecture(
     post_norms=lfm3.ARCHITECTURE.post_norms,
     auto_class=AutoModelForImageTextToText,
     layers_path="model.language_model.layers",
+    norm_path="model.language_model.embedding_norm",
     module_groups={
         LANGUAGE: ("model.language_model", "lm_head"),
         VISION: ("model.vision_tower",),

@@ -33,7 +33,7 @@ pipeline itself is the Python package **`trener`**, run as `python -m trener`.
 The output is **trained models** plus a reproducible training pipeline:
 configurations, checkpoints, logs and metrics, by which the run can be repeated
 and the methods compared. Checkpoints are written locally to
-`runs/<name>/checkpoints/` ([docs/07-usage.md](docs/07-usage.md#75-run-directory-and-metrics));
+`runs/<name>/checkpoints/` ([docs/07-usage/05-run-directory.md](docs/07-usage/05-run-directory.md));
 no trained checkpoints are published yet.
 
 ## Requirements
@@ -43,7 +43,7 @@ no trained checkpoints are published yet.
 - NVIDIA GPU with CUDA and 24 GB of VRAM for training (verified on RTX 4090); the unit tests run on the CPU.
 - The base model downloaded to `models/LFM3-1.7B` (see [Supported models](#supported-models)).
 
-Full list: [docs/07-usage.md](docs/07-usage.md#71-requirements).
+Full list: [docs/07-usage/01-requirements.md](docs/07-usage/01-requirements.md).
 
 ## Quickstart
 
@@ -62,7 +62,7 @@ py -3.13 -m venv .venv
 .venv\Scripts\python.exe -m trener train --config configs/rust_std/rust_keywords_jolt.yaml
 ```
 
-Presets, evaluation, resume and the run directory layout: [docs/07-usage.md](docs/07-usage.md).
+Presets, evaluation, resume and the run directory layout: [docs/07-usage/](docs/07-usage/README.md).
 
 Measure a model on GSM8K (standalone or with `--bench gsm8k` during training) and compare the reports:
 
@@ -94,7 +94,7 @@ Measure a model on GSM8K (standalone or with `--bench gsm8k` during training) an
 | [docs/04-implementation.md](docs/04-implementation.md) | Requirements for the pipeline implementation: components, configuration, prompts, token accounting |
 | [docs/05-references.md](docs/05-references.md) | Primary sources and related work |
 | [docs/06-data.md](docs/06-data.md) | Training data format: dataset catalog, fields `question`, `answer`, `reason`, `answer_type`, manifest and `data` commands |
-| [docs/07-usage.md](docs/07-usage.md) | Running the pipeline: environment, presets, training, artifacts, resume, limitations |
+| [docs/07-usage/](docs/07-usage/README.md) | Running the pipeline, one file per section: environment, presets, training, artifacts, resume, limitations, measurements |
 | [docs/08-sft.md](docs/08-sft.md) | The `sft` stage before JOLT: training on a pre-built documentation corpus (rustdoc JSON), coverage and NLL |
 | [docs/09-lora.md](docs/09-lora.md) | Optional LoRA and QLoRA: frozen (optionally 4-bit NF4) base and low-rank adapters for any method, fine-tuning and continuing an adapter |
 | [docs/10-abliteration.md](docs/10-abliteration.md) | Abliteration for experiments: ablating the refusal direction from the weights, Optuna search on refusal rate and KL, contrast prompt sets |
@@ -114,7 +114,7 @@ Measure a model on GSM8K (standalone or with `--bench gsm8k` during training) an
 
 The standard configs expect the model in `models/LFM3-1.7B` relative to the repository root. The pipeline does not
 download it: fetch the model in advance and place it there (`snapshot_download` command in
-[docs/07-usage.md](docs/07-usage.md#71a-model)), or set `model.path` to another directory.
+[docs/07-usage/01-requirements.md](docs/07-usage/01-requirements.md#71a-model)), or set `model.path` to another directory.
 
 What the pipeline does differently for a model follows from its architecture — the `architectures` field of the
 model's `config.json` — and each architecture is described in its own module of `trener/architectures/`: LFM3 is

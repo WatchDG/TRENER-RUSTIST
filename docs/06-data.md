@@ -255,4 +255,4 @@ runs the same dialogue greedily and puts the model's question, the reply and the
 ## Next
 
 - Privileged information by testbed from the article → [04-implementation.md §4.5](04-implementation.md)
-- Running training → [07-usage.md](07-usage.md)
+- Running training → [07-usage/](07-usage/README.md)

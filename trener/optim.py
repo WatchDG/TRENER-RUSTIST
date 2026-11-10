@@ -2,7 +2,7 @@
 
 The model weights are bf16, and an fp32 master copy lies alongside them: the step `lr≈1e-6` is below
 the bf16 resolution, so the update is computed in fp32 and only then transferred to the model weights
-(docs/07-usage.md §7.8).
+(docs/07-usage/08-limitations.md).
 
 The model gradients (bf16) are not copied: the optimizer casts a gradient to fp32 locally, one parameter
 at a time. After `step()` the gradients are released.

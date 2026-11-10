@@ -4,7 +4,7 @@ Run from the repository root (requires CUDA and the model directory):
 
     .venv/Scripts/python.exe scripts/measure_memory.py --config configs/rust_std/rust_keywords_jolt.yaml --steps 2
 
-Prints the memory measurement tables (docs/07-usage.md §7.9):
+Prints the memory measurement tables (docs/07-usage/09-memory.md):
 VRAM composition after the optimizer is built (weights, master, gradients, optimizer state,
 decode cache), the peaks of allocated and reserved memory by step phase (rollout, cross-scoring,
 optimization pass, `optimizer.step`), and the PCIe speed (pinned and pageable memory, H2D/D2H).

@@ -26,7 +26,7 @@ jobs:
         run: python -m ruff check .
 
   test:
-    # The pipeline targets Windows (docs/07-usage.md); CI runs the CPU part of the suite there.
+    # The pipeline targets Windows (docs/07-usage/01-requirements.md); CI runs the CPU part of the suite there.
     runs-on: windows-latest
     defaults:
       run:

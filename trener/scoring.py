@@ -12,7 +12,7 @@ Token log-probabilities in a role's **own** context are taken from the optimizat
 passes in a **foreign** context are computed (`FOREIGN_PASSES`).
 
 `lm_head` is applied in chunks of positions: the full logit vector over the 128 000-token
-vocabulary is never materialized for the whole sequence (docs/07-usage.md §7.8).
+vocabulary is never materialized for the whole sequence (docs/07-usage/08-limitations.md).
 
 Packing (`max_tokens > 0`): sequences of one group are concatenated into rows without
 padding; `position_ids` restart from 0 for each sequence, so attention and the LFM3

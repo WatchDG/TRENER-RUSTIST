@@ -179,7 +179,7 @@ The `sft` section (applies when `method: sft`):
 
 The `run`, `model`, `optim` and `eval` sections work the same way as in JOLT, including the values in
 whole epochs (`optim.epochs`, `run.checkpoint_every_epochs`, `eval.every_epochs`; see
-[07-usage.md §7.4](07-usage.md)): an epoch is the size of `plan.steps_per_epoch`.
+[§7.4](07-usage/04-training.md)): an epoch is the size of `plan.steps_per_epoch`.
 
 The preset `configs/sft_rust_cargo.yaml` — nine cargo corpora in a list, 5 epochs of 37 steps (185). All crates are learned in one stage. A separate stage per crate,
 one after another, would lead to forgetting the previous ones.

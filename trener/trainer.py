@@ -1147,7 +1147,7 @@ class Trainer:
             kind = "a LoRA run" if adapter else "a run without LoRA"
             raise ValueError(f"checkpoint {checkpoint} is {kind}: resume it with lora.enabled: {str(adapter).lower()}")
         if policy.lora is None:
-            self._load_full_weights(checkpoint)
+            self._load_full_weights(checkpoint, resume=resume)
         elif adapter and (resume or not self.cfg.lora.merge_init):
             tensors, config, base = read_adapter(checkpoint)
             saved, current = base.get("base_quantization"), self.lora_base["base_quantization"]
@@ -1172,13 +1172,26 @@ class Trainer:
             logger.info("LoRA: base weights from %s, the adapter starts from scratch", checkpoint)
         policy.reset_decoder()
 
-    def _load_full_weights(self, checkpoint: Path) -> None:
-        """Model weights and fp32 master of a policy without LoRA; a LoRA checkpoint is merged into the weights."""
-        if (checkpoint / "model.safetensors").exists() or is_adapter_checkpoint(checkpoint):
-            load_model_weights(self.policy, checkpoint)
+    def _load_full_weights(self, checkpoint: Path, *, resume: bool = False) -> None:
+        """Model weights and fp32 master of a policy without LoRA; a LoRA checkpoint is merged into the weights.
 
+        `resume=True` — the saved master must cover exactly the trained parameters of this run: the optimizer state
+        is restored by position, so another `model.trainable`/`model.language_layers` raises `ValueError`.
+        """
         master_file = checkpoint / "master.safetensors"
         state = load_file(str(master_file)) if master_file.exists() else {}
+        if resume and state:
+            saved = {key.removeprefix("master.") for key in state}
+            current = set(self.policy.master_names)
+            if saved != current:
+                raise ValueError(
+                    f"checkpoint {checkpoint} trained other parameters ({len(saved - current)} not trained here, "
+                    f"{len(current - saved)} new): resume it with the same model.trainable and "
+                    "model.language_layers, or start from its weights with --init-from"
+                )
+
+        if (checkpoint / "model.safetensors").exists() or is_adapter_checkpoint(checkpoint):
+            load_model_weights(self.policy, checkpoint)
         # master is the source of truth: the model weights are synchronized with it (`set_master_fp32`);
         # without a saved master it follows the loaded weights, or the first step would restore the old ones
         for index, name in enumerate(self.policy.master_names):

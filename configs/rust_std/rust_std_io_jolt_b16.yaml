@@ -1,4 +1,4 @@
-# Preset variant of rust_std_io_jolt.yaml: 128 rollout rows (B=16, G=4), idea U8 (docs/07-usage.md §7.12).
+# Preset variant of rust_std_io_jolt.yaml: 128 rollout rows (B=16, G=4), idea U8 (docs/07-usage/12-rollout-rows.md).
 # 176 tasks in train: B=16 gives 11 steps per epoch, 22 steps ≈ 2 epochs (same as 44 steps at B=8); lr is the same because the loss is normalized by N.
 # Evaluate every 10 steps, at the same epoch points as every: 20 in the base. The recipe differs: B is not the paper's value.
 run:

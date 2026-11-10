@@ -8,9 +8,9 @@ outputs/
 *.pt
 *.safetensors
 *.bin
-# Assembled full models (`sequence` stages with `dist`, docs/07-usage.md)
+# Assembled full models (`sequence` stages with `dist`, docs/07-usage/06-checkpoints.md)
 /dist/
-# Downloaded base models (docs/07-usage.md, 7.1a)
+# Downloaded base models (docs/07-usage/01-requirements.md, 7.1a)
 /models/
 
 # Data / caches

@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import math
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -170,6 +171,8 @@ class LoraState:
     quantized: dict[str, NF4Linear] = field(default_factory=dict, repr=False)
     #: Module groups whose layers carry adapters (`lora.modules`).
     groups: list[str] = field(default_factory=lambda: [LANGUAGE])
+    #: Decoder layers of the language model that carry adapters (`model.language_layers`), sorted; `None` — all.
+    layers: list[int] | None = None
 
     @property
     def scale(self) -> float:
@@ -199,6 +202,7 @@ class LoraState:
             "dropout": self.dropout,
             "targets": self.targets,
             "modules": self.groups,
+            "layers": self.layers,
             "quantization": self.quantization(),
         }
 
@@ -207,13 +211,20 @@ def _short(name: str) -> str:
     return name.rsplit(".", 1)[-1]
 
 
-def apply_lora(model: nn.Module, cfg: LoraConfig, *, device: torch.device | str | None = None) -> LoraState:
+def apply_lora(
+    model: nn.Module,
+    cfg: LoraConfig,
+    *,
+    device: torch.device | str | None = None,
+    language_layers: Sequence[str] = (),
+) -> LoraState:
     """Freezes the model and replaces the target `nn.Linear` layers with `LoraLinear`.
 
     `cfg.targets` — short layer names; empty — all linear layers except the output embeddings (`lm_head`).
     A name that matches no layer is an error. `cfg.modules` — the module groups whose layers are adapted
     (`trener.architectures`: `language`, `vision`, `projector`); empty — `language` (in a text-only model every
-    layer belongs to it).
+    layer belongs to it). `language_layers` — the decoder layers of the language model that get adapters
+    (`model.language_layers`: indices, ranges, layer types; empty — all); `embeddings` and `norm` are an error.
 
     `cfg.quantize == "nf4"` (QLoRA): every linear layer of the `language` group except `lm_head` is quantized on
     `device` (by default — where its weight is): the targets become `QLoraLinear`, the rest `NF4Linear`. The vision
@@ -235,11 +246,23 @@ def apply_lora(model: nn.Module, cfg: LoraConfig, *, device: torch.device | str 
         if isinstance(module, nn.Linear) and module is not output and name
     ]
     candidates = [(name, module) for name, module in linear if architecture.group_of(name) in groups]
+    selection = architecture.select_layers(model, language_layers)
+    if selection is not None:
+        if LANGUAGE not in groups:
+            raise ValueError(f"model.language_layers: lora.modules {groups} has no language group")
+        if selection.embeddings or selection.norm:
+            raise ValueError("model.language_layers: embeddings and norm are full fine-tuning only, not LoRA")
+        candidates = [
+            (name, module)
+            for name, module in candidates
+            if architecture.group_of(name) != LANGUAGE or architecture.layer_index(name) in selection.layers
+        ]
     available = sorted({_short(name) for name, _ in candidates})
     wanted = set(cfg.targets)
     unknown = sorted(wanted - set(available))
     if unknown:
-        raise ValueError(f"lora.targets: no nn.Linear layers named {unknown} in the model; available: {available}")
+        where = "the selected layers (model.language_layers)" if selection is not None else "the model"
+        raise ValueError(f"lora.targets: no nn.Linear layers named {unknown} in {where}; available: {available}")
     selected = {name for name, _ in candidates if not wanted or _short(name) in wanted}
     if not selected:
         raise ValueError("lora: the model has no linear layers to adapt")
@@ -278,6 +301,7 @@ def apply_lora(model: nn.Module, cfg: LoraConfig, *, device: torch.device | str 
         double_quant=bool(cfg.double_quant),
         quantized=quantized,
         groups=groups,
+        layers=sorted(selection.layers) if selection is not None else None,
     )
 
 
@@ -331,8 +355,12 @@ def merged_model_state(
 
 
 def adapter_config(state: LoraState, base_model: str) -> dict[str, Any]:
-    """`adapter_config.json` in the PEFT format."""
-    return {
+    """`adapter_config.json` in the PEFT format.
+
+    An adapter of selected language layers only (`model.language_layers`, `lora.modules: [language]`) adds PEFT's
+    `layers_to_transform`/`layers_pattern`; with other groups adapted too these fields would exclude their modules.
+    """
+    config: dict[str, Any] = {
         "peft_type": "LORA",
         "task_type": "CAUSAL_LM",
         "base_model_name_or_path": base_model,
@@ -344,6 +372,10 @@ def adapter_config(state: LoraState, base_model: str) -> dict[str, Any]:
         "fan_in_fan_out": False,
         "inference_mode": True,
     }
+    if state.layers is not None and state.groups == [LANGUAGE]:
+        config["layers_to_transform"] = list(state.layers)
+        config["layers_pattern"] = "layers"
+    return config
 
 
 def write_adapter(
@@ -400,7 +432,11 @@ def load_adapter(policy: Policy, tensors: dict[str, torch.Tensor], config: dict[
             "use the same lora settings, or lora.merge_init: true to merge it into the base and train a new adapter"
         )
     if _adapter_modules(tensors) != set(state.modules):
-        raise ValueError("the checkpoint adapter covers different layers than the model adapters")
+        raise ValueError(
+            "the checkpoint adapter covers different layers than the model adapters: use the same "
+            "model.language_layers and lora.modules, or lora.merge_init: true to merge it into the base and train "
+            "a new adapter"
+        )
     index = {name: i for i, name in enumerate(policy.master_names)}
     params = dict(policy.model.named_parameters())
     with torch.no_grad():

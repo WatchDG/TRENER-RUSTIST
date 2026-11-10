@@ -19,7 +19,21 @@ from pathlib import Path
 from typing import Any
 
 from . import lfm3, lfm3_omni, lfm3_vl, llama, spark2_5
-from .base import AUDIO, GENERIC, LANGUAGE, MEDIA_GROUPS, MODULE_GROUPS, PROJECTOR, VISION, VOICE, Architecture
+from .base import (
+    AUDIO,
+    EMBEDDINGS,
+    GENERIC,
+    LANGUAGE,
+    LANGUAGE_PARTS,
+    MEDIA_GROUPS,
+    MODULE_GROUPS,
+    NORM,
+    PROJECTOR,
+    VISION,
+    VOICE,
+    Architecture,
+    LayerSelection,
+)
 
 #: Architectures with their own description, by name from `config.json`.
 ARCHITECTURES: dict[str, Architecture] = {
@@ -68,14 +82,18 @@ def builds_by_remote_code(model: Any) -> bool:
 __all__ = [
     "ARCHITECTURES",
     "AUDIO",
+    "EMBEDDINGS",
     "GENERIC",
     "LANGUAGE",
+    "LANGUAGE_PARTS",
     "MEDIA_GROUPS",
     "MODULE_GROUPS",
+    "NORM",
     "PROJECTOR",
     "VISION",
     "VOICE",
     "Architecture",
+    "LayerSelection",
     "architecture_names",
     "architecture_of",
     "builds_by_remote_code",

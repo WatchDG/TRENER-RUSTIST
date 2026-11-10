@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-11-10
+
+### Added
+
+- `model.language_layers`: train only selected parts of the language model — decoder-layer indices (`12`), inclusive
+  ranges (`20-23`), layer types (`conv`, `full_attention`, `sliding_attention`), `embeddings` and `norm`; the rest of
+  the language model is frozen and gets no master weights. With LoRA, only the linear layers of the selected layers
+  get adapters (`adapter_config.json` adds `layers_to_transform`). Empty by default (the whole language model).
+- `--resume` checks that the checkpoint's master covers the same trained parameters (`model.trainable`,
+  `model.language_layers`): the optimizer state is restored by position, so a changed set is now an error instead of
+  a silently mismatched optimizer state.
+
+### Changed
+
+- List config fields accept YAML integers as items (`language_layers: [12, 20-23]`).
+- `docs/07-usage.md` is split into `docs/07-usage/`: one file per section 7.1–7.13 and an index (`README.md`).
+
 ## [0.12.0] - 2026-11-10
 
 ### Added
@@ -310,7 +327,8 @@ First release.
 - Tests that need the LFM3 tokenizer are skipped when `models/LFM3-1.7B` is
   absent instead of failing.
 
-[Unreleased]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.9.0...v0.10.0

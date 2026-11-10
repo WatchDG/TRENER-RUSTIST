@@ -7,7 +7,7 @@ Thanks for considering a contribution to `trener`.
 - Read the [README](README.md) and the [documentation index](docs/README.md) to
   understand the JOLT / JOLT+ pipeline.
 - Run instructions and the configuration reference are in
-  [docs/07-usage.md](docs/07-usage.md); the `sft` stage is in
+  [docs/07-usage/](docs/07-usage/README.md); the `sft` stage is in
   [docs/08-sft.md](docs/08-sft.md).
 - Model weights are an external prerequisite and are never committed (`models/` is
   in `.gitignore`). Task sets and documentation corpora in `datasets/` are

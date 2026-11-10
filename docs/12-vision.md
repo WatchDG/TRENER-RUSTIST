@@ -92,6 +92,11 @@ weights and no optimizer state (`[vision, projector]` trains only the image path
 the frozen language model into the image features). `policy.info` (`env.txt`) records `trainable_groups` and the
 parameters per group. A text-only model has a single group `language`; another group there is an error.
 
+`model.language_layers` ([§7.4](07-usage/04-training.md)) narrows the `language` group to selected decoder layers,
+layer types, `embeddings` and `norm`: `trainable: [language, vision]` with `language_layers: [20-23]` trains the whole
+vision tower and the last four language layers. The vision tower's own `layers` and `embedding_norm` are never
+selected by it. `model.trainable` must contain `language` (or be empty).
+
 `optim.vision_lr_scale` and `optim.projector_lr_scale` multiply the learning rate of their group (the schedule and
 the warmup are common); `> 0`, freezing is `model.trainable`. Adafactor applies the multiplier per parameter,
 `adamw8bit` per parameter group.
@@ -126,7 +131,7 @@ checkpoint of the full model (bf16 weights + fp32 master) is ≈ 11 GB.
 
 A checkpoint and a `dist/` directory have the keys of the original checkpoint (`model.language_model.*`,
 `model.vision_tower.*`, `model.multi_modal_projector.*`), and `dist/` gets the processor files and the remote code of
-the base model ([07-usage.md §7.6](07-usage.md)); outside the pipeline it is loaded with
+the base model ([§7.6](07-usage/06-checkpoints.md)); outside the pipeline it is loaded with
 `AutoModelForImageTextToText.from_pretrained(dist, trust_remote_code=True)` and `AutoProcessor`.
 
 ## 6. Limitations
