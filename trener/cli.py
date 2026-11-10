@@ -1,8 +1,9 @@
-"""CLI of the pipeline: `python -m trener {train,sequence,speed,bench,eval,summarize,data}`.
+"""CLI of the pipeline: `python -m trener {train,sequence,speed,recipe,bench,eval,summarize,data}`.
 
 `train` runs every method of the config, including `sft` and `abliterate` (`trener/abliteration.py`).
 `bench` measures a model on the benchmarks of `bench/` and compares the reports (`trener/benchmarks.py`);
-`speed` measures the training step time.
+`speed` measures the training step time; `recipe write` writes a training recipe for a data set
+(`trener/recipe_writer.py`).
 
 Exit codes: 0 — success, 1 — configuration/environment error.
 """
@@ -97,7 +98,7 @@ def _overrides(args: argparse.Namespace) -> list[str]:
 
 
 def _load(args: argparse.Namespace) -> JoltConfig:
-    cfg = load_config(args.config)
+    cfg = load_config(args.config, recipe=getattr(args, "recipe", None))
     overrides = _overrides(args)
     if overrides:
         cfg = apply_overrides(cfg, overrides)
@@ -338,7 +339,12 @@ def cmd_sequence(args: argparse.Namespace) -> int:
     """Sequential training: stages from the configs chained together (`trener/sequence.py`)."""
     from .sequence import load_sequence, run_sequence
 
-    seq = load_sequence(args.config, extra_overrides=_overrides(args), init_from=getattr(args, "init_from", None))
+    seq = load_sequence(
+        args.config,
+        extra_overrides=_overrides(args),
+        init_from=getattr(args, "init_from", None),
+        recipe=getattr(args, "recipe", None),
+    )
     # the CUDA allocator is configured once, before the first stage
     _apply_cuda_alloc_conf(seq.stages[0].cfg)
     return run_sequence(seq)
@@ -358,6 +364,34 @@ def cmd_speed(args: argparse.Namespace) -> int:
         raise ConfigError("speed measures a JOLT step; abliterate logs trial_s per trial in the run's metrics.jsonl")
     result = run_speed(cfg, int(args.steps))
     print(format_table(result))
+    return 0
+
+
+# ------------------------------------------------------------------ recipe
+
+
+def cmd_recipe_write(args: argparse.Namespace) -> int:
+    """Writes a recipe for the config's training set (`trener/recipe_writer.py`, docs/14-recipes.md)."""
+    from .recipe_writer import WriterOptions, run_recipe_write
+    from .sequence import _checkpoint_path
+
+    cfg = _load(args)
+    options = WriterOptions(
+        out=Path(args.out) if args.out else None,
+        force=bool(args.force),
+        init_from=_checkpoint_path(args.init_from) if args.init_from else None,
+        probe_steps=int(args.probe_steps),
+        budget=float(args.budget),
+        granularity=str(args.granularity),
+        block=int(args.block),
+        max_weights=int(args.max_weights),
+        false_units=float(args.false_units),
+        trials=int(args.trials),
+        trial_steps=int(args.trial_steps),
+    )
+    result = run_recipe_write(cfg, options)
+    print(f"recipe: {result['recipe']} ({result['winner']}, chosen by {result['decided_by']})")
+    print(f"report: {result['report']}")
     return 0
 
 
@@ -673,6 +707,8 @@ def _print_corpus_plan(args: argparse.Namespace) -> None:
 
 #: `--bench` of `train` and `sequence`.
 BENCH_FLAG_HELP = "benchmark during training (bench/<NAME>); repeatable, shorthand for --set bench.names=..."
+#: `--recipe` of `train`, `speed` and `sequence`.
+RECIPE_FLAG_HELP = "recipe file (docs/14-recipes.md): replaces the config's recipe; over the config, under --set"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -699,6 +735,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="override a single config field (e.g. --set optim.lr=2e-6)",
     )
     train.add_argument("--bench", action="append", default=None, metavar="NAME", help=BENCH_FLAG_HELP)
+    train.add_argument("--recipe", default=None, metavar="PATH", help=RECIPE_FLAG_HELP)
     train.set_defaults(func=cmd_train)
 
     sequence = sub.add_parser("sequence", help="sequential training over a list of configs (checkpoint chain)")
@@ -716,6 +753,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="checkpoint directory: the first stage starts from its weights (not from the base model or its init_from)",
     )
     sequence.add_argument("--bench", action="append", default=None, metavar="NAME", help=BENCH_FLAG_HELP)
+    sequence.add_argument(
+        "--recipe", default=None, metavar="PATH", help="recipe file for every stage (replaces the stages' recipes)"
+    )
     sequence.set_defaults(func=cmd_sequence)
 
     speed = sub.add_parser("speed", help="measure training step speed (without checkpoints and evaluation)")
@@ -728,7 +768,40 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="KEY=VALUE",
         help="override a single config field (e.g. --set rollout.engine=static)",
     )
+    speed.add_argument("--recipe", default=None, metavar="PATH", help=RECIPE_FLAG_HELP)
     speed.set_defaults(func=cmd_speed)
+
+    recipe = sub.add_parser("recipe", help="training recipes: what trains and how (docs/14-recipes.md)")
+    recipe_actions = recipe.add_subparsers(dest="action", required=True)
+    write = recipe_actions.add_parser(
+        "write", help="measure the model on the config's training set and write a recipe for it"
+    )
+    write.add_argument("--config", required=True, help="run config: model, method, data, candidates to train")
+    write.add_argument("--set", action="append", default=None, metavar="KEY=VALUE", help="config override")
+    write.add_argument("--init-from", default=None, help="checkpoint directory: measure and train from its weights")
+    write.add_argument("--out", default=None, help="recipe file (default recipes/<run.name>.yaml)")
+    write.add_argument("--force", action="store_true", help="overwrite an existing recipe file")
+    write.add_argument("--probe-steps", type=int, default=8, help="training steps the gradients are recorded over")
+    write.add_argument(
+        "--budget", type=float, default=0.0, help="share of the candidate weights that may train, (0, 1]; 0 — no limit"
+    )
+    write.add_argument(
+        "--granularity",
+        default="rows",
+        choices=("layers", "tensors", "rows", "blocks", "weights"),
+        help="the finest selection allowed (default rows)",
+    )
+    write.add_argument("--block", type=int, default=64, help="side of a grid block of the blocks level")
+    write.add_argument("--max-weights", type=int, default=10_000, help="single weights at most (weights level)")
+    write.add_argument(
+        "--false-units",
+        type=float,
+        default=1.0,
+        help="units a level may take on gradient noise alone, in expectation (default 1): the significance bar",
+    )
+    write.add_argument("--trials", type=int, default=4, help="candidates trained to compare (0 — the estimate decides)")
+    write.add_argument("--trial-steps", type=int, default=20, help="training steps of each trial")
+    write.set_defaults(func=cmd_recipe_write)
 
     bench = sub.add_parser("bench", help="model benchmarks: measure, compare reports (docs/11-benchmarks.md)")
     bench_actions = bench.add_subparsers(dest="action", required=True)

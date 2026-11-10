@@ -52,6 +52,7 @@ ENV_KEYS = (
     "n_trainable_parameters",
     "language_layers",
     "trainable_weights",
+    "recipe",
     "lora",
     "attn_implementation",
     "gpu_name",
@@ -165,6 +166,8 @@ class RunArtifacts:
         self.metrics_path = self.run_dir / "metrics.jsonl"
         self.curves_path = self.run_dir / "curves.csv"
         self.summary_path = self.run_dir / "summary.md"
+        #: Copy of the applied recipe (`docs/14-recipes.md`).
+        self.recipe_path = self.run_dir / "recipe.yaml"
 
     # ------------------------------------------------------------------
     # Configuration and environment
@@ -185,6 +188,10 @@ class RunArtifacts:
             self.config_path.write_text(payload, encoding="utf-8")
         else:
             save_config(cfg, self.config_path)
+            recipe = getattr(cfg, "recipe", None)
+            if recipe is not None:
+                # the snapshot already holds the recipe's values; its text is kept as it was read
+                self.recipe_path.write_text(recipe.text, encoding="utf-8")
         return self.config_path
 
     def write_env(self, info: dict[str, Any]) -> Path:

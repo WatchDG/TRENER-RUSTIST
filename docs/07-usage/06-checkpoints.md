@@ -71,6 +71,7 @@ stages:
   - config: configs/rust_std/rust_keywords_jolt.yaml
   - config: configs/rust_std/rust_traits_jolt.yaml
   - config: configs/rust_std/rust_macros_jolt.yaml
+    recipe: recipes/top.yaml # optional: the stage's recipe (14-recipes.md); --recipe replaces it for every stage
     set: [optim.steps=80]    # optional: overrides, like --set for train
     init_from: runs/x/checkpoints/step-40   # optional: replaces the chain for this stage
 ```

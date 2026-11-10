@@ -35,7 +35,7 @@ from .schedule import resolved_steps
 logger = logging.getLogger("trener")
 
 _TOP_FIELDS = {"name", "out_dir", "dist_dir", "stages"}
-_STAGE_FIELDS = {"config", "set", "init_from", "dist"}
+_STAGE_FIELDS = {"config", "recipe", "set", "init_from", "dist"}
 _DIST_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 #: Weights of the source model are not copied into `dist`: `model.safetensors` from the checkpoint is used instead.
 _WEIGHT_PATTERNS = ("*.safetensors", "*.safetensors.index.json")
@@ -70,12 +70,17 @@ class SequenceConfig:
 
 
 def load_sequence(
-    path: str | Path, extra_overrides: list[str] | None = None, init_from: str | Path | None = None
+    path: str | Path,
+    extra_overrides: list[str] | None = None,
+    init_from: str | Path | None = None,
+    recipe: str | Path | None = None,
 ) -> SequenceConfig:
     """Reads the sequence YAML, builds stage configurations and checks the invariants.
 
     `extra_overrides` (command-line `--set`) are applied to all stages after their
     `set`: they take precedence.
+    `recipe` (command-line `--recipe`) is the recipe of every stage, in place of the stage's `recipe` field and of
+    the `recipe` key of its config.
     `init_from` (command-line `--init-from`) is the checkpoint whose weights the first
     stage starts from; it takes precedence over the stage's `init_from` field. The
     checkpoint is checked immediately, before training.
@@ -120,6 +125,9 @@ def load_sequence(
         overrides = item.get("set") or []
         if not isinstance(overrides, list) or not all(isinstance(entry, str) for entry in overrides):
             raise ConfigError(f"{where}.set: expected a list of strings 'section.field=value'")
+        stage_recipe = item.get("recipe")
+        if stage_recipe is not None and not isinstance(stage_recipe, str):
+            raise ConfigError(f"{where}.recipe: expected a path to a recipe file")
         init_from = item.get("init_from")
         if init_from is not None and not isinstance(init_from, str):
             raise ConfigError(f"{where}.init_from: expected a path to a checkpoint directory")
@@ -131,7 +139,9 @@ def load_sequence(
             )
         try:
             cfg = resolve_eval_batch_size(
-                apply_overrides(load_config(item["config"]), [*overrides, *(extra_overrides or [])])
+                apply_overrides(
+                    load_config(item["config"], recipe=recipe or stage_recipe), [*overrides, *(extra_overrides or [])]
+                )
             )
         except ConfigError as exc:
             raise ConfigError(f"{where} ({item['config']}): {exc}") from exc

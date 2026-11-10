@@ -114,6 +114,22 @@ def parse_weight_rules(raw: Any, what: str = _WHAT) -> list[dict[str, Any]]:
     return rules
 
 
+def format_ranges(indices: Any) -> list[int | str]:
+    """Indices as items of `rows`/`cols` (and `model.language_layers`): sorted, runs as inclusive ranges `"20-23"`."""
+    items: list[int | str] = []
+    first = last = None
+    for value in sorted({int(index) for index in indices}):
+        if last is not None and value == last + 1:
+            last = value
+            continue
+        if first is not None:
+            items.append(first if first == last else f"{first}-{last}")
+        first = last = value
+    if first is not None:
+        items.append(first if first == last else f"{first}-{last}")
+    return items
+
+
 def _bounds(item: int | str) -> tuple[int, int]:
     bounds = parse_range(item, _WHAT)
     assert bounds is not None  # canonical items are valid
@@ -372,6 +388,7 @@ __all__ = [
     "RULE_KEYS",
     "SELECTIONS",
     "Region",
+    "format_ranges",
     "parse_weight_rules",
     "read_regions",
     "region_keys",

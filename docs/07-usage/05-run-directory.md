@@ -2,7 +2,9 @@
 
 ```
 runs/<name>/
-  config.yaml            # full snapshot of the run's configuration
+  config.yaml            # full snapshot of the run's configuration (a recipe's values merged in)
+  recipe.yaml            # with a recipe: its text as read (14-recipes.md)
+  recipe/                # only for `recipe write`: probe.json, candidates.json
   env.txt                # Python/torch/transformers, GPU, model fingerprint, git revision
   metrics.jsonl          # exactly one JSON line per step
   curves.csv             # flat projection of metrics.jsonl for plots (step rows only)

@@ -20,6 +20,7 @@ Useful keys:
 | `--set lora.quantize=nf4` | QLoRA: together with `lora.enabled=true`, the frozen base in 4-bit NF4 ([09-lora.md §7](../09-lora.md)) |
 | `--set model.language_layers=20-23,norm` | train only the selected parts of the language model, the rest is frozen (below) |
 | `model.trainable_weights` | train only selected rows, columns, blocks and single weights of tensors (below) |
+| `--recipe recipes/<name>.yaml` | apply a training recipe — what trains and how — over the config, under `--set` ([14-recipes.md](../14-recipes.md)); `recipe write` writes one for a training set |
 | `--bench gsm8k` | measure the model on a benchmark of `bench/` at the start, at the end (and every `bench.every` steps); repeatable, shorthand for `--set bench.names=...` ([11-benchmarks.md](../11-benchmarks.md)) |
 | `--set run.profile=true` | additionally write the breakdown of the optimization phase (`forward_backward_time_s`, `optimizer_time_s`) |
 
@@ -39,7 +40,9 @@ model:
 | `norm` | the final norm of the language model (LFM3 `embedding_norm`) |
 
 Items may overlap. Everything of the language model that is not selected is frozen: it gets no fp32 master and no
-optimizer state, the gradient still flows through it to the trained layers below. With LoRA
+optimizer state, the gradient still flows through it to the trained layers below. Backward stops at the lowest
+trained layer: frozen layers under it cost only their forward pass (with `embeddings` selected, backward runs through
+every layer). With LoRA
 ([09-lora.md](../09-lora.md)) only the linear layers of the selected layers get adapters, and `embeddings`/`norm` are
 an error. Other module groups of a multimodal model are set by `model.trainable` / `lora.modules` as before; the
 `language` group must be among them. The syntax is checked when the config loads; a layer out of range or a type

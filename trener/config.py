@@ -557,6 +557,9 @@ class JoltConfig:
     lora: LoraConfig = field(default_factory=LoraConfig)
     abliteration: AbliterationConfig = field(default_factory=AbliterationConfig)
     bench: BenchConfig = field(default_factory=BenchConfig)
+    #: The recipe applied over the config (`trener.recipe.Recipe`, `docs/14-recipes.md`); `None` — none. Its values
+    #: are already in the sections: the snapshot (`to_dict`) holds them and not the recipe itself.
+    recipe: Any = None
 
     @property
     def run_dir(self) -> Path:
@@ -1050,8 +1053,11 @@ def resolve_eval_batch_size(cfg: JoltConfig) -> JoltConfig:
     return cfg
 
 
-def load_config(path: str | Path) -> JoltConfig:
-    """Reads the YAML configuration, builds the sections and checks the invariants."""
+def load_config(path: str | Path, recipe: Any = None) -> JoltConfig:
+    """Reads the YAML configuration, builds the sections, applies the recipe and checks the invariants.
+
+    `recipe` — a recipe file or mapping (`--recipe`) that replaces the config's own `recipe` key.
+    """
     config_path = Path(path)
     if not config_path.is_absolute():
         candidate = (Path.cwd() / config_path).resolve()
@@ -1065,7 +1071,7 @@ def load_config(path: str | Path) -> JoltConfig:
     if not isinstance(raw, dict):
         raise ConfigError(f"root of the config must be a mapping, got {type(raw).__name__}")
 
-    known_top = {"method", *_SECTIONS}
+    known_top = {"method", "recipe", *_SECTIONS}
     unknown = sorted(set(raw) - known_top)
     if unknown:
         raise ConfigError(f"unknown top-level fields {unknown}; allowed: {sorted(known_top)}")
@@ -1088,7 +1094,49 @@ def load_config(path: str | Path) -> JoltConfig:
 
     cfg = JoltConfig(method=method, **sections)
     _resolve_config_paths(cfg)
+    if recipe is None:
+        recipe = raw.get("recipe")
+        if recipe is not None and not isinstance(recipe, (str, dict)):
+            raise ConfigError(f"recipe must be a path to a recipe file or a mapping, got {type(recipe).__name__}")
+    if recipe is not None:
+        from .recipe import load_recipe
+
+        return apply_recipe(cfg, load_recipe(recipe))
     return validate_config(cfg)
+
+
+def _clear_epoch_twins(cfg: JoltConfig, assigned: set[str]) -> None:
+    """A step field set without its epoch twin clears the twin: the value in steps is the one meant."""
+    for (twin_section, step_field), epoch_field in EPOCH_TWINS.items():
+        step_key, epoch_key = f"{twin_section}.{step_field}", f"{twin_section}.{epoch_field}"
+        if step_key in assigned and epoch_key not in assigned:
+            setattr(getattr(cfg, twin_section), epoch_field, 0)
+
+
+def apply_recipe(cfg: JoltConfig, recipe: Any) -> JoltConfig:
+    """The config with the fields of `recipe` (`trener.recipe.Recipe`) applied: a copy, checked.
+
+    A recipe field replaces the config's value whole; a step field clears its epoch twin as with `--set`. Values are
+    cast as in YAML (strictly). Errors name the recipe.
+    """
+    cfg = clone_config(cfg)
+    assigned: set[str] = set()
+    for section_name, values in recipe.sections.items():
+        section = getattr(cfg, section_name)
+        hints = typing.get_type_hints(type(section))
+        for field_name, value in values.items():
+            key = f"{section_name}.{field_name}"
+            try:
+                setattr(section, field_name, _coerce_value(key, hints[field_name], value))
+            except ConfigError as exc:
+                raise ConfigError(f"recipe {recipe.name!r}: {exc}") from exc
+            assigned.add(key)
+    _clear_epoch_twins(cfg, assigned)
+    cfg.recipe = recipe
+    try:
+        return validate_config(cfg)
+    except ConfigError as exc:
+        raise ConfigError(f"{exc} (with recipe {recipe.name!r})") from exc
 
 
 def save_config(cfg: JoltConfig, path: str | Path) -> Path:
@@ -1133,11 +1181,7 @@ def apply_overrides(cfg: JoltConfig, overrides: list[str] | None) -> JoltConfig:
         setattr(section, field_name, _coerce_value(key, target, value, from_text=True))
         overridden.add(key)
     # an override of one field of a steps/epochs pair clears its twin (unless the twin is overridden too)
-    for (twin_section, step_field), epoch_field in EPOCH_TWINS.items():
-        step_key, epoch_key = f"{twin_section}.{step_field}", f"{twin_section}.{epoch_field}"
-        section = getattr(cfg, twin_section)
-        if step_key in overridden and epoch_key not in overridden:
-            setattr(section, epoch_field, 0)
+    _clear_epoch_twins(cfg, overridden)
     _resolve_config_paths(cfg)
     return validate_config(cfg)
 
@@ -1158,6 +1202,7 @@ def clone_config(cfg: JoltConfig) -> JoltConfig:
         lora=LoraConfig(**cfg.lora.to_dict()),
         abliteration=AbliterationConfig(**cfg.abliteration.to_dict() | {"prompts": Path(cfg.abliteration.prompts)}),
         bench=BenchConfig(**cfg.bench.to_dict()),
+        recipe=cfg.recipe,
     )
 
 
@@ -1212,6 +1257,7 @@ __all__ = [
     "SftConfig",
     "TaskConfig",
     "apply_overrides",
+    "apply_recipe",
     "benchmark_path",
     "clone_config",
     "describe",

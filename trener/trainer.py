@@ -372,12 +372,14 @@ def _storage(quantization: dict[str, Any] | None) -> str:
 class Trainer:
     """Runs a JOLT step and makes one update of the shared parameters."""
 
-    def __init__(self, cfg: JoltConfig, policy: Policy, artifacts: RunArtifacts) -> None:
+    def __init__(self, cfg: JoltConfig, policy: Policy, artifacts: RunArtifacts, optimizer: Any = None) -> None:
+        """`optimizer` — a ready stand-in of the optimizer (the gradient probe of `recipe write`, `trener/probe.py`);
+        `None` — the optimizer of the config over the policy's master weights."""
         self.cfg = cfg
         self.policy = policy
         self.artifacts = artifacts
         self.counter = TokenCounter()
-        self.optimizer = build_optimizer(cfg, policy)
+        self.optimizer = build_optimizer(cfg, policy) if optimizer is None else optimizer
         self.step_index = 0
         self.uses_teacher = cfg.method in ("jolt", "jolt+")
         self._checkpoint_thread: threading.Thread | None = None

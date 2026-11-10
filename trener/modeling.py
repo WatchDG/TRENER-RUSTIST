@@ -239,6 +239,12 @@ class Policy:
                 if selective:
                     kwargs["context_fn"] = selective_context_fn
                 self.model.gradient_checkpointing_enable(gradient_checkpointing_kwargs=kwargs)
+                # transformers hooks the input embeddings to require a gradient (needed by reentrant checkpointing):
+                # the hidden states then carry one through frozen lower layers, and backward runs through all of
+                # them. Non-reentrant checkpointing needs no such hook: backward stops at the lowest trained layer.
+                disable = getattr(self.model, "disable_input_require_grads", None)
+                if callable(disable):
+                    disable()
             self.selective_checkpointing = bool(selective)
             if free_layers > 0:
                 layers = architecture_of(self.model).decoder_layers(self.model)
@@ -632,6 +638,17 @@ def load_policy(cfg: JoltConfig, *, with_master: bool = True) -> Policy:
         if not policy.info["conv_kernel"]:
             warnings.warn(
                 "model.conv_kernel: requires CUDA, Triton and short-convolution layers — the torch path stays",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+    recipe = getattr(cfg, "recipe", None)
+    if recipe is not None:
+        policy.info["recipe"] = recipe.info()
+        written_for = recipe.source.get("model_fingerprint")
+        if written_for and written_for != policy.model_fingerprint:
+            warnings.warn(
+                f"recipe {recipe.name!r} was written for model {str(written_for)[:12]}, the loaded model is "
+                f"{policy.model_fingerprint[:12]}: its selection was measured on other weights",
                 RuntimeWarning,
                 stacklevel=2,
             )

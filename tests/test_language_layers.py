@@ -183,11 +183,20 @@ def test_frozen_prefix_keeps_the_gradients_of_the_trained_layers(
     partial.set_gradient_checkpointing(True, selective=selective, free_layers=free_layers)
     reference = build_policy(lfm3_model_factory(), tokenizer, device=CPU, dtype="float32")
     ids = torch.tensor([[1, 5, 9, 42, 7, 3, 11, 64, 2, 8]])
+    carries: dict[int, bool] = {}
+    for index, layer in enumerate(partial.model.model.layers):
+        layer.register_forward_hook(
+            lambda module, args, out, index=index: carries.__setitem__(
+                index, (out[0] if isinstance(out, tuple) else out).requires_grad
+            )
+        )
     for policy in (partial, reference):
         policy.train()
         logits = policy.model(input_ids=ids).logits
         torch.log_softmax(logits[0, :-1].float(), -1).gather(-1, ids[0, 1:, None]).sum().backward()
 
+    # backward stops at the lowest trained layer: transformers' input-embedding hook is removed
+    assert [carries[index] for index in range(6)] == [False, False, False, True, True, True]
     expected = dict(reference.model.named_parameters())
     names = _trained(partial.model)
     assert names and _layers_of(partial.model, names) == {3, 4, 5, None}

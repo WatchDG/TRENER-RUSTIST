@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-11-10
+
+### Added
+
+- Training recipes (`docs/14-recipes.md`): a YAML file of what trains and how — `model.trainable`,
+  `model.language_layers`, `model.trainable_weights`, checkpointing, `optim`, `lora` — kept apart from the data of a
+  run. A recipe applies over a config and under `--set`: the `recipe:` key of a config (a path or a mapping),
+  `--recipe` of `train`, `speed` and `sequence`, the `recipe:` field of a `sequence` stage. The run keeps the merged
+  values in `config.yaml`, the recipe's text in `recipe.yaml` and its name and sha256 in `env.txt`.
+- `python -m trener recipe write`: a recipe for a training set. A gradient probe runs real steps of the method
+  (`sft`, `jolt`, `jolt+`, `opsd`, `grpo`) without updating, estimates the first-order gain of an Adafactor step for
+  every layer, tensor, row, column, block and weight, keeps the units whose gain stands above the gradient noise, and
+  fits a step-time model (backward depth, tensors touched, elements trained). Candidates per level and lowest trained
+  layer maximize the estimated gain per second within `--budget`; the best of them and the reference train short
+  trials, and the most measured quality per second wins. The report goes to `runs/<run.name>/recipe/`.
+
+### Fixed
+
+- Backward now stops at the lowest trained layer. `transformers`' `gradient_checkpointing_enable` hooked the input
+  embeddings to require a gradient (needed only by reentrant checkpointing), so the hidden states carried one through
+  every frozen lower layer and backward ran through the whole model. The hook is removed. Training the top layer
+  of LFM3-1.7B: backward + forward 0.95 → 0.36 s per step (4 × 2048 tokens, RTX 4090). Gradients are unchanged.
+
 ## [0.14.0] - 2026-11-10
 
 ### Added
@@ -343,7 +366,8 @@ First release.
 - Tests that need the LFM3 tokenizer are skipped when `models/LFM3-1.7B` is
   absent instead of failing.
 
-[Unreleased]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.15.0...HEAD
+[0.15.0]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.11.0...v0.12.0

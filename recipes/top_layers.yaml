@@ -1,0 +1,11 @@
+# Example recipe (docs/14-recipes.md): the top four decoder layers of LFM3-1.7B and its final norm, full fine-tuning.
+# Backward stops at layer 20, so a step costs about the forward pass plus four layers of backward.
+# Apply over any run config: python -m trener train --config <config> --recipe recipes/top_layers.yaml
+recipe: 1
+name: top_layers
+description: decoder layers 20-23 and the final norm
+model:
+  language_layers: [20-23, norm]
+  trainable_weights: []
+optim:
+  master_storage: split
