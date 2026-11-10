@@ -24,17 +24,14 @@ import torch
 import torch.nn.functional as F
 
 from .audio import load_clip
+from .filehash import file_sha256
 
 #: Directory of the cached codes of target recordings (relative to the repository root; git-ignored `.cache/`).
 CODES_CACHE = Path(__file__).resolve().parent.parent / ".cache" / "speech-codes"
 
 
 def _file_sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for block in iter(lambda: stream.read(1 << 20), b""):
-            digest.update(block)
-    return digest.hexdigest()
+    return file_sha256(path)
 
 
 class SpeechCodec:

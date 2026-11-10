@@ -137,6 +137,9 @@ class ModelConfig:
     compile_kernels: bool = False
     #: Selective checkpointing: `matmul` and SDPA are not recomputed in backward (requires `gradient_checkpointing`).
     selective_checkpointing: bool = False
+    #: The last decoder layers that are not recomputed in backward (their activations stay in memory: faster, more
+    #: VRAM; 0 — every layer is checkpointed; requires `gradient_checkpointing`).
+    checkpoint_free_layers: int = 0
     #: Module groups trained without LoRA (`language`, `vision`, `projector` — `trener.architectures`); empty — all
     #: groups of the model. The other groups are frozen and get no master weights.
     trainable: list[str] = field(default_factory=list)
@@ -146,6 +149,9 @@ class ModelConfig:
     image_max_tokens: int = 1024
     #: Longest audio clip of a prompt of a model with speech input, seconds (12.5 audio tokens per second).
     audio_max_seconds: float = 30.0
+    #: Host memory for the prepared images and the log-mel features of each media encoder, GiB: media of a corpus that
+    #: fits are decoded once (at tokenization), not again in every epoch; the oldest entries leave when it is full.
+    media_cache_gb: float = 3.0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -156,10 +162,12 @@ class ModelConfig:
             "gradient_checkpointing": self.gradient_checkpointing,
             "compile_kernels": self.compile_kernels,
             "selective_checkpointing": self.selective_checkpointing,
+            "checkpoint_free_layers": self.checkpoint_free_layers,
             "trainable": list(self.trainable),
             "image_min_tokens": self.image_min_tokens,
             "image_max_tokens": self.image_max_tokens,
             "audio_max_seconds": self.audio_max_seconds,
+            "media_cache_gb": self.media_cache_gb,
         }
 
 
@@ -250,6 +258,9 @@ class OptimConfig:
     master_storage: str = "fp32"
     #: Memory-saving mode: lower halves of master in pinned RAM, the optimizer step streams through the GPU.
     master_offload: bool = False
+    #: Adafactor step as one compiled function per parameter (CUDA): faster, the result equals the reference
+    #: up to rounding (the default step is bitwise equal to `transformers`).
+    fused_step: bool = False
     #: Learning rate multipliers of the vision tower and the projector of a vision-language model (`lr × scale`).
     vision_lr_scale: float = 1.0
     projector_lr_scale: float = 1.0
@@ -272,6 +283,7 @@ class OptimConfig:
             "warmup_epochs": self.warmup_epochs,
             "master_storage": self.master_storage,
             "master_offload": self.master_offload,
+            "fused_step": self.fused_step,
             "vision_lr_scale": self.vision_lr_scale,
             "projector_lr_scale": self.projector_lr_scale,
             "audio_lr_scale": self.audio_lr_scale,
@@ -681,6 +693,10 @@ def validate_config(cfg: JoltConfig) -> JoltConfig:
         raise ConfigError("model.path must not be empty")
     if cfg.model.selective_checkpointing and not cfg.model.gradient_checkpointing:
         raise ConfigError("model.selective_checkpointing requires model.gradient_checkpointing: true")
+    if cfg.model.checkpoint_free_layers < 0:
+        raise ConfigError(f"model.checkpoint_free_layers must be ≥ 0, got {cfg.model.checkpoint_free_layers}")
+    if cfg.model.checkpoint_free_layers and not cfg.model.gradient_checkpointing:
+        raise ConfigError("model.checkpoint_free_layers requires model.gradient_checkpointing: true")
     _check_groups("model.trainable", cfg.model.trainable)
     if not 0 < cfg.model.image_min_tokens <= cfg.model.image_max_tokens:
         raise ConfigError(
@@ -689,6 +705,8 @@ def validate_config(cfg: JoltConfig) -> JoltConfig:
         )
     if not math.isfinite(cfg.model.audio_max_seconds) or cfg.model.audio_max_seconds <= 0:
         raise ConfigError(f"model.audio_max_seconds must be > 0, got {cfg.model.audio_max_seconds}")
+    if not math.isfinite(cfg.model.media_cache_gb) or cfg.model.media_cache_gb <= 0:
+        raise ConfigError(f"model.media_cache_gb must be > 0, got {cfg.model.media_cache_gb}")
     for key in ("vision_lr_scale", "projector_lr_scale", "audio_lr_scale", "voice_lr_scale"):
         value = getattr(cfg.optim, key)
         if not math.isfinite(value) or value <= 0:

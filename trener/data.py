@@ -32,6 +32,8 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 
+from .filehash import file_sha256
+
 logger = logging.getLogger(__name__)
 
 #: Privileged information type "verified answer" (docs/04-implementation.md §4.5).
@@ -238,11 +240,7 @@ class DatasetSummary:
 
 
 def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for block in iter(lambda: stream.read(1 << 20), b""):
-            digest.update(block)
-    return digest.hexdigest()
+    return file_sha256(path)
 
 
 def read_manifest(dataset_dir: str | Path) -> dict[str, Any]:

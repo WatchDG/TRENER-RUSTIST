@@ -18,6 +18,7 @@ model:
   attn_implementation: sdpa
   gradient_checkpointing: true
   compile_kernels: true
+  checkpoint_free_layers: 8   # the last 8 of 24 layers are not recomputed in backward: step −5%, reserved VRAM 14.4 → 17.5 GB (docs/07-usage.md §7.13)
 sft:
   corpus: datasets/rust-docs/rust-std-docs-0001
   max_tokens: 4096
@@ -35,6 +36,7 @@ optim:
   schedule: cosine
   warmup_steps: 16
   master_storage: split
+  fused_step: true          # compiled Adafactor step: 0.34 → 0.19 s, equal to the reference up to rounding (§7.13)
 eval:
   every_epochs: 1                # NLL on the test split of the corpus, once per epoch
   split: test

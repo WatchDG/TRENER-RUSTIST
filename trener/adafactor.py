@@ -59,42 +59,51 @@ def adafactor_step(
     scale_parameter: bool = False,
     warmup_init: bool = False,
     weight_decay: float = 0.0,
+    fused: bool = False,
 ) -> None:
     """One Adafactor step: updates the fp32 `param` and `state` in place.
 
     `grad` — a gradient of any real dtype (bf16 is cast to fp32 locally, as in `transformers`).
-    An empty `state` is initialized.
+    An empty `state` is initialized. `fused=True` runs the step as one compiled function (CUDA): the result
+    equals the reference up to the rounding of the reductions, and the unused `state["RMS"]` is not updated.
     """
     _check_supported(beta1, relative_step, scale_parameter, warmup_init, weight_decay)
     if param.dtype != torch.float32:
         raise ValueError(f"adafactor_step expects an fp32 parameter, got {param.dtype}")
     if grad.is_sparse:
         raise RuntimeError("Adafactor does not support sparse gradients.")
-    if grad.dtype in {torch.float16, torch.bfloat16}:
+    if grad.dtype in {torch.float16, torch.bfloat16} and not (fused and param.is_cuda):
         grad = grad.float()
 
     grad_shape = grad.shape
     factored = len(grad_shape) >= 2
+    use_fused = fused and param.is_cuda
+    stats = torch.float32 if use_fused else grad.dtype  # the fused step reads a bf16 gradient, the statistics are fp32
     if len(state) == 0:
         state["step"] = 0
         if factored:
-            state["exp_avg_sq_row"] = torch.zeros(grad_shape[:-1], dtype=grad.dtype, device=grad.device)
-            state["exp_avg_sq_col"] = torch.zeros(
-                grad_shape[:-2] + grad_shape[-1:], dtype=grad.dtype, device=grad.device
-            )
+            state["exp_avg_sq_row"] = torch.zeros(grad_shape[:-1], dtype=stats, device=grad.device)
+            state["exp_avg_sq_col"] = torch.zeros(grad_shape[:-2] + grad_shape[-1:], dtype=stats, device=grad.device)
         else:
-            state["exp_avg_sq"] = torch.zeros_like(grad)
+            state["exp_avg_sq"] = torch.zeros(grad_shape, dtype=stats, device=grad.device)
         state["RMS"] = 0
-    elif factored:
-        state["exp_avg_sq_row"] = state["exp_avg_sq_row"].to(grad)
-        state["exp_avg_sq_col"] = state["exp_avg_sq_col"].to(grad)
     else:
-        state["exp_avg_sq"] = state["exp_avg_sq"].to(grad)
+        for key in ("exp_avg_sq_row", "exp_avg_sq_col") if factored else ("exp_avg_sq",):
+            state[key] = state[key].to(device=grad.device, dtype=stats)
 
     state["step"] += 1
+    beta2t = 1.0 - math.pow(state["step"], decay_rate)
+    if use_fused:
+        scalars = _scalars(beta2t, lr, param.device)
+        if factored:
+            _fused_kernel("factored")(
+                param, grad, state["exp_avg_sq_row"], state["exp_avg_sq_col"], scalars, eps[0], clip_threshold
+            )
+        else:
+            _fused_kernel("plain")(param, grad, state["exp_avg_sq"], scalars, eps[0], clip_threshold)
+        return
     state["RMS"] = _rms(param)
 
-    beta2t = 1.0 - math.pow(state["step"], decay_rate)
     update = (grad**2) + eps[0]
     if factored:
         exp_avg_sq_row = state["exp_avg_sq_row"]
@@ -110,7 +119,56 @@ def adafactor_step(
 
     update.div_((_rms(update) / clip_threshold).clamp_(min=1.0))
     update.mul_(lr)
-    param.add_(-update)
+    param.sub_(update)  # the same bits as `add_(-update)`, without the negated copy
+
+
+def _fused_factored(param, grad, row, col, scalars, eps, clip):
+    """The factored step in one pass over the data: the compiler fuses the reductions and element-wise chains.
+
+    `scalars` — a device tensor `[beta2t, 1 − beta2t, lr]`: the compiler would bake Python floats into the kernel.
+    """
+    beta2t, mix, lr = scalars[0], scalars[1], scalars[2]
+    grad = grad.float()
+    square = grad * grad + eps
+    row.mul_(beta2t).add_(square.mean(dim=-1) * mix)
+    col.mul_(beta2t).add_(square.mean(dim=-2) * mix)
+    r_factor = (row / row.mean(dim=-1, keepdim=True)).rsqrt().unsqueeze(-1)
+    update = r_factor * col.unsqueeze(-2).rsqrt() * grad
+    update = update / (update.norm(2) / (update.numel() ** 0.5) / clip).clamp(min=1.0)
+    param.sub_(update * lr)
+
+
+def _fused_plain(param, grad, exp_avg_sq, scalars, eps, clip):
+    """The step of a one-dimensional parameter (no factorization)."""
+    beta2t, mix, lr = scalars[0], scalars[1], scalars[2]
+    grad = grad.float()
+    exp_avg_sq.mul_(beta2t).add_((grad * grad + eps) * mix)
+    update = exp_avg_sq.rsqrt() * grad
+    update = update / (update.norm(2) / (update.numel() ** 0.5) / clip).clamp(min=1.0)
+    param.sub_(update * lr)
+
+
+_FUSED: dict[str, Any] = {}
+_SCALARS: dict[tuple[float, float, str], torch.Tensor] = {}
+
+
+def _fused_kernel(name: str) -> Any:
+    if name not in _FUSED:
+        function = _fused_factored if name == "factored" else _fused_plain
+        _FUSED[name] = torch.compile(function, dynamic=True)
+    return _FUSED[name]
+
+
+def _scalars(beta2t: float, lr: float, device: torch.device) -> torch.Tensor:
+    """`[beta2t, 1 − beta2t, lr]` on the device; the few distinct values of a step are uploaded once."""
+    key = (beta2t, lr, str(device))
+    value = _SCALARS.get(key)
+    if value is None:
+        if len(_SCALARS) >= 256:
+            _SCALARS.clear()
+        value = torch.tensor([beta2t, 1.0 - beta2t, lr], dtype=torch.float32, device=device)
+        _SCALARS[key] = value
+    return value
 
 
 class FunctionalAdafactor:
@@ -129,7 +187,9 @@ class FunctionalAdafactor:
         clip_threshold: float = DEFAULT_CLIP_THRESHOLD,
         decay_rate: float = DEFAULT_DECAY_RATE,
         lr_scales: Sequence[float] | None = None,
+        fused: bool = False,
     ) -> None:
+        self.fused = bool(fused)
         self.states: list[dict[str, Any]] = [{} for _ in range(count)]
         #: Learning rate multiplier of each parameter (the module group's `optim.*_lr_scale`).
         self.lr_scales: list[float] = [float(scale) for scale in lr_scales] if lr_scales is not None else [1.0] * count
@@ -161,6 +221,7 @@ class FunctionalAdafactor:
             eps=tuple(group["eps"]),
             clip_threshold=float(group["clip_threshold"]),
             decay_rate=float(group["decay_rate"]),
+            fused=self.fused,
         )
 
     def state_tensors(self) -> list[torch.Tensor]:

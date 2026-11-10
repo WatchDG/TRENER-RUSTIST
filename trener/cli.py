@@ -572,6 +572,7 @@ def _media_encoder(cfg: JoltConfig) -> Any:
         image_min_tokens=cfg.model.image_min_tokens,
         image_max_tokens=cfg.model.image_max_tokens,
         audio_max_seconds=cfg.model.audio_max_seconds,
+        cache_gb=cfg.model.media_cache_gb,
     )
 
 

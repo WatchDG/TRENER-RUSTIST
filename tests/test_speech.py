@@ -340,6 +340,21 @@ def test_static_decoder_with_audio_matches_generate(
             assert not set(trajectory.completion_ids) & set(policy.suppressed_ids)
 
 
+def test_batched_evaluation_generation_matches_single_rows(tiny_omni_policy: Any, omni_clips: list[Path]) -> None:
+    """Greedy recognition of clips of different lengths in one batch gives what each clip gives alone."""
+    from trener.media import Media
+    from trener.speech_eval import _generate_many, _render_asr
+
+    policy = tiny_omni_policy
+    policy.eval()
+    clips = [Media(audio=policy.media.audio.describe([path])) for path in omni_clips]
+    prompts = [_render_asr(policy, "Perform ASR in Russian.", clip) for clip in clips]
+    assert len({len(prompt) for prompt in prompts}) == 3  # the rows are padded in the batch
+    together = _generate_many(policy, prompts, "text", [6, 6, 6], clips)
+    alone = [_generate_many(policy, [p], "text", [6], [c])[0] for p, c in zip(prompts, clips, strict=True)]
+    assert together == alone
+
+
 # ------------------------------------------------------------------------ data
 
 

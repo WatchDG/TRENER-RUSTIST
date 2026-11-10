@@ -17,8 +17,9 @@ Everything else is the standard `sdpa_attention_forward`.
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from collections.abc import Sequence
-from typing import Any
+from typing import Any, NamedTuple
 
 import torch
 from transformers import AttentionInterface
@@ -55,6 +56,93 @@ def jolt_sdpa_attention(
     return sdpa_attention_forward(module, query, key, value, attention_mask, dropout=dropout, scaling=scaling, **kwargs)
 
 
+#: A document joins a bucket while its length is at least this fraction of the bucket's longest document.
+BUCKET_RATIO = 0.75
+
+#: Longer documents are not bucketed: their own attention dominates a call, and the gathers of a bucket only add copies.
+BUCKET_MAX_LENGTH = 256
+
+#: Plans of recent rows (the recomputation of gradient checkpointing and every layer reuse the row's plan).
+_PLAN_CACHE_SIZE = 16
+
+
+class _Bucket(NamedTuple):
+    """Documents of similar length: one SDPA call. `index is None` — a single document `[start, start + length)`."""
+
+    length: int
+    start: int
+    index: torch.Tensor | None  # [n, length] row positions (the padding repeats the last real token)
+    valid: torch.Tensor | None  # [n, length] True on the real tokens
+
+
+class _Plan(NamedTuple):
+    buckets: tuple[_Bucket, ...]
+    inverse: torch.Tensor | None  # token order from the concatenated bucket outputs
+
+
+_PLANS: OrderedDict[tuple[tuple[int, ...], str], _Plan] = OrderedDict()
+_MASKS: dict[tuple[int, int, str], torch.Tensor] = {}
+
+
+def _bucket_plan(documents: Sequence[int], device: torch.device) -> _Plan:
+    """Groups the documents of a row by length (longest first, ratio `BUCKET_RATIO`); cached per row layout."""
+    lengths = tuple(int(length) for length in documents)
+    key = (lengths, str(device))
+    plan = _PLANS.get(key)
+    if plan is not None:
+        _PLANS.move_to_end(key)
+        return plan
+    starts, total = [], 0
+    for length in lengths:
+        starts.append(total)
+        total += length
+    order = sorted(range(len(lengths)), key=lambda i: -lengths[i])
+    buckets: list[_Bucket] = []
+    destinations: list[torch.Tensor] = []
+    position = 0
+    while position < len(order):
+        top = lengths[order[position]]
+        end = position + 1
+        while top <= BUCKET_MAX_LENGTH and end < len(order) and lengths[order[end]] >= BUCKET_RATIO * top:
+            end += 1
+        members = order[position:end]
+        position = end
+        if len(members) == 1:
+            start = starts[members[0]]
+            buckets.append(_Bucket(top, start, None, None))
+            destinations.append(torch.arange(start, start + top))
+            continue
+        offsets = torch.tensor([starts[i] for i in members])[:, None]
+        sizes = torch.tensor([lengths[i] for i in members])[:, None]
+        columns = torch.arange(top)[None, :]
+        valid = columns < sizes
+        index = offsets + torch.minimum(columns, sizes - 1)
+        buckets.append(_Bucket(top, 0, index.to(device), valid.to(device)))
+        destinations.append(index[valid])
+    inverse = None
+    if len(buckets) > 1 or buckets[0].index is not None:
+        inverse = torch.argsort(torch.cat(destinations)).to(device)
+    plan = _Plan(tuple(buckets), inverse)
+    _PLANS[key] = plan
+    while len(_PLANS) > _PLAN_CACHE_SIZE:
+        _PLANS.popitem(last=False)
+    return plan
+
+
+def _band_mask(length: int, window: int, device: torch.device) -> torch.Tensor:
+    """Sliding-window mask `[1, 1, L, L]`: key `j` is visible to query `i` if `i − W < j ≤ i`."""
+    key = (length, window, str(device))
+    mask = _MASKS.get(key)
+    if mask is None:
+        positions = torch.arange(length, device=device)
+        distance = positions[:, None] - positions[None, :]
+        mask = ((distance >= 0) & (distance < window))[None, None]
+        if len(_MASKS) >= 64:
+            _MASKS.pop(next(iter(_MASKS)))
+        _MASKS[key] = mask
+    return mask
+
+
 def _document_attention(
     query: torch.Tensor,
     key: torch.Tensor,
@@ -64,38 +152,40 @@ def _document_attention(
     dropout: float,
     scaling: float | None,
 ) -> tuple[torch.Tensor, None]:
-    """Causal attention inside each document of the row `[1, H, T, D]`; the documents go one after another.
+    """Causal attention inside each document of the row `[1, H, T, D]`.
 
-    Sliding window — as in `transformers`: key `j` is visible to query `i` if `i − W < j ≤ i`.
+    Documents of similar length go in one SDPA call (`[documents, H, L, D]`, right padding): a real query `i`
+    sees only the keys `≤ i`, which are real, so the padding changes nothing. A document of a unique length is
+    a call of its own. Sliding window — as in `transformers`: key `j` is visible to query `i` if `i − W < j ≤ i`.
     """
     groups = query.shape[1] // key.shape[1]
+    plan = _bucket_plan(documents, query.device)
     outputs = []
-    start = 0
-    for length in documents:
-        end = start + int(length)
-        doc_key, doc_value = key[:, :, start:end], value[:, :, start:end]
-        # The SDPA kernel on CUDA does not accept head groups without a mask, and the document's K/V is small.
+    for bucket in plan.buckets:
+        length = bucket.length
+        if bucket.index is None:
+            doc_query = query[:, :, bucket.start : bucket.start + length]
+            doc_key = key[:, :, bucket.start : bucket.start + length]
+            doc_value = value[:, :, bucket.start : bucket.start + length]
+        else:
+            # [1, H, T, D] → [n, H, L, D]
+            doc_query = query[0][:, bucket.index].transpose(0, 1)
+            doc_key = key[0][:, bucket.index].transpose(0, 1)
+            doc_value = value[0][:, bucket.index].transpose(0, 1)
+        # The SDPA kernel on CUDA does not accept head groups without a mask, and the documents' K/V are small.
         if groups > 1:
             doc_key, doc_value = repeat_kv(doc_key, groups), repeat_kv(doc_value, groups)
-        mask = None
-        if sliding_window is not None and length > sliding_window:
-            positions = torch.arange(int(length), device=query.device)
-            distance = positions[:, None] - positions[None, :]
-            mask = ((distance >= 0) & (distance < sliding_window))[None, None]
-        outputs.append(
-            torch.nn.functional.scaled_dot_product_attention(
-                query[:, :, start:end],
-                doc_key,
-                doc_value,
-                attn_mask=mask,
-                dropout_p=dropout,
-                scale=scaling,
-                is_causal=mask is None,
-            )
+        mask = _band_mask(length, sliding_window, query.device) if sliding_window and length > sliding_window else None
+        result = torch.nn.functional.scaled_dot_product_attention(
+            doc_query, doc_key, doc_value, attn_mask=mask, dropout_p=dropout, scale=scaling, is_causal=mask is None
         )
-        start = end
-    output = outputs[0] if len(outputs) == 1 else torch.cat(outputs, dim=2)
-    return output.transpose(1, 2).contiguous(), None
+        if bucket.index is None:
+            outputs.append(result[0].transpose(0, 1))  # [L, H, D]
+        else:
+            outputs.append(result.transpose(1, 2)[bucket.valid])  # [real tokens, H, D]
+    if plan.inverse is None:
+        return outputs[0].unsqueeze(0).contiguous(), None
+    return torch.cat(outputs)[plan.inverse].unsqueeze(0).contiguous(), None
 
 
 def _decode_attention(

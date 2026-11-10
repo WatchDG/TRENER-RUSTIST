@@ -106,3 +106,23 @@ def test_unsupported_options_are_rejected() -> None:
             adafactor_step(param, grad, {}, lr=LR, **option)
     with pytest.raises(ValueError, match="fp32"):
         adafactor_step(torch.zeros(4, dtype=torch.bfloat16), grad, {}, lr=LR)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA")
+@pytest.mark.parametrize("shape", SHAPES)
+def test_fused_step_matches_reference_closely(shape: tuple[int, ...]) -> None:
+    """The compiled step follows the reference within rounding of the reductions; state and parameter alike."""
+    generator = torch.Generator().manual_seed(1)
+    initial = torch.randn(shape, generator=generator).cuda()
+    expected = initial.clone()
+    fused = initial.clone()
+    expected_state: dict[str, Any] = {}
+    fused_state: dict[str, Any] = {}
+    for grad in _gradients(shape, "cuda", seed=2, steps=5):
+        adafactor_step(expected, grad, expected_state, lr=LR)
+        adafactor_step(fused, grad, fused_state, lr=LR, fused=True)
+        torch.testing.assert_close(fused, expected, rtol=1e-5, atol=1e-9)
+    assert fused_state["step"] == expected_state["step"] == 5
+    for key, value in expected_state.items():
+        if isinstance(value, torch.Tensor) and key != "RMS":  # the fused step does not track the unused RMS
+            torch.testing.assert_close(fused_state[key], value, rtol=1e-5, atol=1e-30)

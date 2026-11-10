@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-11-10
+
+### Added
+
+- `model.checkpoint_free_layers`: the last N decoder layers run without gradient checkpointing.
+- `optim.fused_step`: Adafactor step as one compiled function per parameter (CUDA); off by default, the default step
+  stays bitwise equal to `transformers`.
+- `model.media_cache_gb`: host memory of the image and log-mel feature caches (default 3 GiB; was 1 GiB and 512 MiB).
+- `sft` metrics: `forward_backward_time_s` and `optimizer_time_s` with `run.profile=true`; `eval_time_s` and
+  `speech_eval_time_s` on evaluation steps. `trener/filehash.py`.
+- `docs/07-usage.md` §7.13: the measured speedups and what was rejected.
+
+### Changed
+
+- Packed attention groups the documents of a row by length (≤ 256 tokens) into one SDPA call: the SFT step on a corpus
+  of short documents is 20% faster; rows of long documents take the previous path.
+- Speech evaluation runs in batches of 16 (137 s → 30 s for 16 texts and 16 clips). Round trip numbers differ from
+  v0.10.0 because the batch samples speech differently; a recording longer than `model.audio_max_seconds` counts as
+  CER 1.0 instead of stopping the run.
+- `scripts/build_self_speech_corpus.py`: retries only the texts that did not pass, batch 32, the frame limit comes
+  from the source recording, results are saved after every pass and a rerun resumes (378 s → 203 s on 96 texts).
+- File hashes (corpus, manifest seals, speech code cache) are computed once per file and process.
+- `configs/sft_rust_std.yaml` enables `checkpoint_free_layers: 8` and `fused_step`.
+
 ## [0.10.0] - 2026-11-10
 
 ### Added
@@ -267,7 +291,8 @@ First release.
 - Tests that need the LFM3 tokenizer are skipped when `models/LFM3-1.7B` is
   absent instead of failing.
 
-[Unreleased]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.7.0...v0.8.0

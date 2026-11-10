@@ -123,7 +123,7 @@ Checking the environment:
 .venv\Scripts\python.exe -c "import trener; print(trener.__version__)"
 ```
 
-Expected: `2.13.0+cu130 13.0 True` and `0.10.0`.
+Expected: `2.13.0+cu130 13.0 True` and `0.11.0`.
 
 Data: the presets read tasks from the dataset directory `datasets/rust/rust-keywords-0001` (field `task.dataset`,
 format — [06-data.md](06-data.md)). Checking the dataset:
@@ -232,6 +232,9 @@ Performance parameters (they do not affect the step's math):
 | `run.cuda_alloc_conf` | `""` | value of `PYTORCH_CUDA_ALLOC_CONF` (for example `max_split_size_mb:512`), set before the first access to CUDA; an explicitly set environment variable takes priority; `expandable_segments` is not supported on Windows (`configuration error`) |
 | `run.pinned_checkpoint` | `false` | the checkpoint snapshot is copied into pinned buffers asynchronously (the main thread does not wait for the copy into ordinary memory); bit-for-bit the same checkpoint |
 | `model.selective_checkpointing` | `false` | selective checkpointing: during recomputation in backward, `matmul` and SDPA are not repeated, only element-wise operations; requires `gradient_checkpointing: true` |
+| `model.checkpoint_free_layers` | `0` | the last N decoder layers are not recomputed in backward (faster, more VRAM; requires `gradient_checkpointing: true`, §7.13) |
+| `model.media_cache_gb` | `3.0` | host memory of the cache of prepared images and log-mel features of each media encoder, GiB (§7.13) |
+| `optim.fused_step` | `false` | Adafactor step as one compiled function per parameter (CUDA): equal to the reference up to rounding, not bitwise (§7.13) |
 | `optim.master_storage` | `fp32` | `fp32` — a separate fp32 master; `split` — bf16 model weights + `int16` low halves (the same fp32 master bit-for-bit, −3.2 GB VRAM); only `adafactor` (§7.9) |
 | `optim.master_offload` | `false` | economy mode: low halves of the master in pinned RAM, the optimizer step streamed through the GPU; requires `master_storage: split` and CUDA (§7.9) |
 
@@ -752,6 +755,45 @@ a dataset on which the method learns noticeably and several seeds are needed to 
 Conclusion: `B=16` gives +14–19% trajectories per second and −12% step time at the same epochs, but this is a different recipe (twice
 fewer updates). The production presets do not change; the `_b16` variant is for experiments where the number of epochs per
 unit of time matters more than the number of updates.
+
+## 7.13 SFT and Speech Speedups (v0.11.0)
+
+The survey of the training path (code reading plus the timings in `runs/`) found the items below; each was measured
+before and after on an RTX 4090 and kept only for a gain of at least 3% on some workload and at most 1% loss on
+the others. Workloads: **A** — text SFT with many short documents (`configs/sft_rust_std.yaml`, 10 steps, 8 rows of
+4096 tokens, `run.profile=true`); **B** — Omni speech SFT (`configs/smoke_sft_lfm3_omni_fleurs_ru.yaml`, 12 steps of
+8 rows, evaluation on 16 texts and clips); **C** — the JOLT control (`trener speed`, `rust_keywords_jolt`, 6 steps).
+Medians of the steps after the first two.
+
+| Change | Workload | Before | After |
+|---|---|---|---|
+| Documents of one row grouped by length into one SDPA call (`trener/attention.py`, documents ≤ 256 tokens) | A, step | 5.69 s | 4.57 s (−20%) |
+| `optim.fused_step: true` | A, optimizer step | 0.34 s | 0.19 s (step −4%) |
+| `model.checkpoint_free_layers: 4 / 8 / 12` of 24 | A, step (reserved VRAM) | 4.38 s (13.8 GB) | 4.29 / 4.18 / 4.08 s (15.8 / 17.5 / 19.2 GB) |
+| Batched speech evaluation (16 rows per `generate`) | B, evaluation of 16 texts and 16 clips | 137 s | 30 s |
+| All of the above except `checkpoint_free_layers` | B, step | 5.57 s | 5.13 s (−8%) |
+| The same | C, step | 13.30 s | 13.33 s (no change) |
+| `scripts/build_self_speech_corpus.py`: only unaccepted texts retried, batch 32, limit from the recording's length | 96 texts, 2 samples | 378 s | 203 s |
+
+Not measured separately (small or only at startup): one SHA-256 pass per file and process (`trener/filehash.py`; the
+corpus, the manifest seals and the speech code cache hashed every file two to three times), the media cache of 3 GiB
+instead of 1 GiB / 512 MiB, losses summed on the device (one synchronization per step instead of two per row).
+
+- **Why the attention gain stops at 20%.** The loop over documents was a launch-bound cost; grouping removes it for
+  documents of similar length. A single-document group takes the old path, so a row of a few long trajectories (JOLT)
+  is unchanged; `BUCKET_MAX_LENGTH = 256` keeps long documents out of groups (without the cap C was +1% slower).
+  `BUCKET_RATIO` 0.5 and 0.75 measured the same.
+- **`optim.fused_step`** is off by default because the default step is bitwise equal to `transformers`
+  (`tests/test_adafactor.py`); the fused step follows it to float rounding (`rtol 1e-5`) and does not update the unused
+  `state["RMS"]`. `sft_rust_std.yaml` enables it.
+- **`checkpoint_free_layers`** trades VRAM for time: the 8 last layers keep their activations. On a 24 GB card shared
+  with the desktop (about 3.7 GB used) keep the reserved memory under about 20 GB; `sft_rust_std.yaml` uses 8. The JOLT
+  presets are unchanged (the rollout cache and the update share the memory).
+- **Speech evaluation numbers move.** The batch samples speech differently from one row at a time, so `eval_tts_cer`
+  of v0.11.0 is not comparable to v0.10.0 (base model, 16 texts: 0.0824 → 0.0527 at the same weights); between the
+  steps of one run it is. A recording longer than `model.audio_max_seconds` counts as CER 1.0.
+
+Rejected after measuring: bucketing documents longer than 256 tokens (no gain, +1% on C).
 
 ## Next
 

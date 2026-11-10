@@ -98,6 +98,11 @@ The `sft` evaluation on the corpus `test` split reports, besides the text NLL:
   (NFKC, lowercase, without punctuation) says whether the speech is intelligible — to the model itself;
 * `eval_asr_cer` — speech recognition of `eval.limit` test clips against their transcriptions.
 
+The speech evaluation is batched (16 prompts per `generate`, left padding, rows sorted by length; `speech_eval_time_s`
+in the metrics): 137 s → 30 s for 16 texts and 16 clips. A row is cut at its own frame limit and a recording longer
+than `model.audio_max_seconds` counts as CER 1.0. Batch sampling differs from one row at a time, so the round trip
+numbers of v0.10.0 are not comparable (docs/07-usage.md §7.13).
+
 The transcripts are in `runs/<name>/eval/speech-step-N.json`.
 
 ## 5. Russian speech on FLEURS

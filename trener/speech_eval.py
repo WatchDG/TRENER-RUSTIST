@@ -74,34 +74,72 @@ def _render_asr(policy: Policy, system: str, clip: Media) -> list[int]:
     return policy.media.expand(ids, clip)
 
 
+#: Prompts of one `generate` call of the evaluation (the rows are padded on the left to the longest prompt).
+EVAL_BATCH = 16
+
+
 @torch.no_grad()
-def _generate(policy: Policy, prompt: Sequence[int], mode: str, max_new_tokens: int, media: Media | None) -> Any:
-    """The model's own `generate` for one prompt (greedy text, the checkpoint's speech sampling with a fixed seed)."""
+def _generate_many(
+    policy: Policy,
+    prompts: Sequence[Sequence[int]],
+    mode: str,
+    max_new_tokens: Sequence[int],
+    medias: Sequence[Media | None],
+) -> list[Any]:
+    """The model's own `generate` for the prompts in batches (greedy text, the checkpoint's speech sampling).
+
+    The prompts are sorted by length so that a batch pads little; the result follows the order of `prompts`:
+    for `mode="text"` the generated token ids of a row, for `mode="audio"` its frames `[frames, codebooks]`.
+    Every batch starts from the same seed, so a result does not depend on the other batches.
+    """
     from .rollout import _media_inputs
 
-    torch.manual_seed(0)
-    input_ids = torch.tensor([list(prompt)], dtype=torch.long, device=policy.device)
-    return policy.model.generate(
-        input_ids=input_ids,
-        attention_mask=torch.ones_like(input_ids),
-        max_new_tokens=int(max_new_tokens),
-        generation_mode=mode,
-        do_sample=False,
-        return_dict_in_generate=True,
-        **_media_inputs(policy, [media]),
-    )
+    pad = policy.tokenizer.pad_token_id
+    pad = policy.tokenizer.eos_token_id if pad is None else pad
+    order = sorted(range(len(prompts)), key=lambda i: len(prompts[i]))
+    results: list[Any] = [None] * len(prompts)
+    for start in range(0, len(order), EVAL_BATCH):
+        rows = order[start : start + EVAL_BATCH]
+        width = max(len(prompts[i]) for i in rows)
+        input_ids = torch.tensor(
+            [[pad] * (width - len(prompts[i])) + list(prompts[i]) for i in rows], dtype=torch.long, device=policy.device
+        )
+        attention_mask = torch.tensor(
+            [[0] * (width - len(prompts[i])) + [1] * len(prompts[i]) for i in rows],
+            dtype=torch.long,
+            device=policy.device,
+        )
+        torch.manual_seed(0)
+        out = policy.model.generate(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            max_new_tokens=int(max(max_new_tokens[i] for i in rows)),
+            generation_mode=mode,
+            do_sample=False,
+            return_dict_in_generate=True,
+            **_media_inputs(policy, [medias[i] for i in rows]),
+        )
+        for position, index in enumerate(rows):
+            if mode == "audio":
+                # a batch runs to its longest row: a row keeps the limit it was asked for
+                frames = min(int(out.audio_lengths[position]), int(max_new_tokens[index]))
+                results[index] = out.audio_codes[position, :, :frames].T
+            else:
+                results[index] = out.sequences[position, width:].tolist()
+    return results
 
 
-def _transcribe(policy: Policy, prompt: Sequence[int], media: Media, max_new_tokens: int) -> str:
-    out = _generate(policy, prompt, "text", max_new_tokens, media)
-    tokens = out.sequences[0, len(prompt) :].tolist()
-    return policy.tokenizer.decode(tokens, skip_special_tokens=True).strip()
+def _transcribe_many(
+    policy: Policy, prompts: Sequence[Sequence[int]], clips: Sequence[Media], max_new_tokens: Sequence[int]
+) -> list[str]:
+    tokens = _generate_many(policy, prompts, "text", max_new_tokens, clips)
+    return [policy.tokenizer.decode(row, skip_special_tokens=True).strip() for row in tokens]
 
 
 def evaluate_speech(
     policy: Policy, documents: Sequence[Document], *, limit: int, out_dir: str | Path | None = None
 ) -> dict[str, Any]:
-    """Speech synthesis round trip and speech recognition on up to `limit` documents of each kind."""
+    """Speech synthesis round trip and speech recognition on up to `limit` documents of each kind (batched)."""
     import soundfile
 
     encoder = policy.media
@@ -119,9 +157,15 @@ def evaluate_speech(
     try:
         if speak and encoder.codec is not None:
             codec = encoder.codec.to(policy.device)
-            for doc in speak:
-                out = _generate(policy, doc.prompt.tolist(), "audio", 2 * doc.speech_frames + 25, None)
-                frames = out.audio_codes[0, :, : int(out.audio_lengths[0])].T
+            spoken = _generate_many(
+                policy,
+                [doc.prompt.tolist() for doc in speak],
+                "audio",
+                [2 * doc.speech_frames + 25 for doc in speak],
+                [None] * len(speak),
+            )
+            heard_docs: list[tuple[int, Media, list[int]]] = []
+            for doc, frames in zip(speak, spoken, strict=True):
                 wave = codec.decode(frames)
                 entry: dict[str, Any] = {"id": doc.doc_id, "text": doc.reference, "frames": int(frames.shape[0])}
                 system = asr_prompt(doc.system)
@@ -131,22 +175,38 @@ def evaluate_speech(
                     soundfile.write(str(path), wave.numpy(), codec.sample_rate)
                     entry["wav"] = str(path)
                     if system is not None:
-                        clip = Media(audio=encoder.audio.describe([path]))
-                        prompt = _render_asr(policy, system, clip)
-                        heard = _transcribe(policy, prompt, clip, 4 * len(doc.reference) + 32)
-                        entry |= {"transcript": heard, "cer": round(char_error_rate(heard, doc.reference), 4)}
+                        try:
+                            clip = Media(audio=encoder.audio.describe([path]))
+                        except ValueError:  # longer than `model.audio_max_seconds`: the model rambled — not understood
+                            entry |= {"transcript": "", "cer": 1.0}
+                        else:
+                            heard_docs.append((len(tts), clip, _render_asr(policy, system, clip)))
                 tts.append(entry)
-        for doc in hear:
-            assert doc.media is not None
-            heard = _transcribe(policy, doc.prompt.tolist(), doc.media, 4 * len(doc.reference) + 32)
-            asr.append(
-                {
-                    "id": doc.doc_id,
-                    "reference": doc.reference,
-                    "transcript": heard,
-                    "cer": round(char_error_rate(heard, doc.reference), 4),
-                }
+            transcripts = _transcribe_many(
+                policy,
+                [prompt for _, _, prompt in heard_docs],
+                [clip for _, clip, _ in heard_docs],
+                [4 * len(tts[index]["text"]) + 32 for index, _, _ in heard_docs],
             )
+            for (index, _, _), heard in zip(heard_docs, transcripts, strict=True):
+                tts[index] |= {"transcript": heard, "cer": round(char_error_rate(heard, tts[index]["text"]), 4)}
+        if hear:
+            assert all(doc.media is not None for doc in hear)
+            transcripts = _transcribe_many(
+                policy,
+                [doc.prompt.tolist() for doc in hear],
+                [doc.media for doc in hear],  # type: ignore[misc]
+                [4 * len(doc.reference) + 32 for doc in hear],
+            )
+            for doc, heard in zip(hear, transcripts, strict=True):
+                asr.append(
+                    {
+                        "id": doc.doc_id,
+                        "reference": doc.reference,
+                        "transcript": heard,
+                        "cer": round(char_error_rate(heard, doc.reference), 4),
+                    }
+                )
     finally:
         policy.set_use_cache(False)
         if previous_training:

@@ -185,11 +185,13 @@ class Policy:
         """Toggles the KV cache: needed for generation, disabled during scoring/training."""
         _set_use_cache(self.model, enabled)
 
-    def set_gradient_checkpointing(self, enabled: bool, *, selective: bool = False) -> None:
+    def set_gradient_checkpointing(self, enabled: bool, *, selective: bool = False, free_layers: int = 0) -> None:
         """Enables/disables gradient checkpointing (saves activation memory).
 
         `selective=True` — selective mode: during recomputation in backward, `matmul` and SDPA are not repeated
         (their results are saved); only element-wise operations are recomputed (`selective_checkpoint_policy`).
+        `free_layers` — the last decoder layers of the language model run without checkpointing: their activations
+        stay in memory, and backward does not repeat their forward.
         """
         active = bool(getattr(self.model, "is_gradient_checkpointing", False))
         if enabled and active and selective != self.selective_checkpointing:
@@ -202,6 +204,10 @@ class Policy:
                     kwargs["context_fn"] = selective_context_fn
                 self.model.gradient_checkpointing_enable(gradient_checkpointing_kwargs=kwargs)
             self.selective_checkpointing = bool(selective)
+            if free_layers > 0:
+                layers = architecture_of(self.model).decoder_layers(self.model)
+                for layer in list(layers)[max(0, len(layers) - int(free_layers)) :]:
+                    layer.gradient_checkpointing = False
         elif active:
             self.model.gradient_checkpointing_disable()
             self.selective_checkpointing = False
@@ -499,6 +505,7 @@ def load_policy(cfg: JoltConfig, *, with_master: bool = True) -> Policy:
         image_min_tokens=cfg.model.image_min_tokens,
         image_max_tokens=cfg.model.image_max_tokens,
         audio_max_seconds=cfg.model.audio_max_seconds,
+        cache_gb=cfg.model.media_cache_gb,
     )
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     if media is not None and media.codec is not None:
@@ -516,7 +523,11 @@ def load_policy(cfg: JoltConfig, *, with_master: bool = True) -> Policy:
         trainable=cfg.model.trainable if with_master else (),
         media=media,
     )
-    policy.set_gradient_checkpointing(cfg.model.gradient_checkpointing, selective=cfg.model.selective_checkpointing)
+    policy.set_gradient_checkpointing(
+        cfg.model.gradient_checkpointing,
+        selective=cfg.model.selective_checkpointing,
+        free_layers=cfg.model.checkpoint_free_layers,
+    )
     if cfg.model.compile_kernels:
         from torch.utils._triton import has_triton
 

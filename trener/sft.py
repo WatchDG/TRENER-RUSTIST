@@ -30,7 +30,7 @@ from .corpus import Document, SftPlan, corpus_fingerprint, load_corpora, load_co
 from .losses import policy_gradient_loss
 from .media import MediaEncoder
 from .scoring import SpeechLosses, score_sequences
-from .trainer import Trainer, _peak_memory_gb, _peak_reserved_gb, _ratio, _synchronize
+from .trainer import Trainer, _peak_memory_gb, _peak_reserved_gb, _PhaseClock, _ratio, _synchronize
 
 if TYPE_CHECKING:  # pragma: no cover - for typing only
     from .cli import TrainResult
@@ -58,6 +58,9 @@ class SftMetrics:
     #: Speech answers (`kind: speech`): frames of the step and their mean depth-decoder loss.
     speech_frames: int = 0
     speech_loss: float = 0.0
+    #: Breakdown of the step (only with `run.profile=true`): backward passes and the optimizer, seconds.
+    forward_backward_time_s: float | None = None
+    optimizer_time_s: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -75,6 +78,14 @@ class SftMetrics:
             "update_tok_s": self.update_tok_s,
             "peak_memory_gb": self.peak_memory_gb,
             "reserved_memory_gb": self.reserved_memory_gb,
+            **{
+                key: round(value, 4)
+                for key, value in (
+                    ("forward_backward_time_s", self.forward_backward_time_s),
+                    ("optimizer_time_s", self.optimizer_time_s),
+                )
+                if value is not None
+            },
         }
 
 
@@ -100,28 +111,32 @@ class SftTrainer(Trainer):
         self.optimizer.zero_grad()
         self.policy.set_use_cache(False)
         self.policy.train()
-        loss_value = 0.0
-        speech_sum = 0.0
+        loss_sum: torch.Tensor | None = None  # accumulated on the device: one synchronization per step
+        speech_total: torch.Tensor | None = None
+        row_clock = _PhaseClock(bool(self.cfg.run.profile))
+        optimizer_clock = _PhaseClock(bool(self.cfg.run.profile))
         for row in rows:
             items = [doc.item_pair() for doc in row]
             speech = SpeechLosses([None] * len(row), generator) if any(doc.speech_frames for doc in row) else None
-            values = score_sequences(
-                self.policy,
-                items,
-                micro_batch_size=len(items),
-                grad=True,
-                max_tokens=max_tokens,
-                speech=speech,
-                **_document_kwargs(row),
-            )
+            with row_clock.measure():
+                values = score_sequences(
+                    self.policy,
+                    items,
+                    micro_batch_size=len(items),
+                    grad=True,
+                    max_tokens=max_tokens,
+                    speech=speech,
+                    **_document_kwargs(row),
+                )
             logps = torch.cat([value.reshape(-1) for value in values])
             loss = policy_gradient_loss(logps, torch.full_like(logps, text_weight), denominator)
             if speech is not None:
                 frames = torch.cat([value for value in speech.values if value is not None])
                 loss = loss + speech_weight * frames.sum() / denominator
-                speech_sum += float(frames.detach().sum())
-            loss.backward()
-            loss_value += float(loss.detach())
+                speech_total = frames.detach().sum() if speech_total is None else speech_total + frames.detach().sum()
+            with row_clock.measure():
+                loss.backward()
+            loss_sum = loss.detach() if loss_sum is None else loss_sum + loss.detach()
             row_tokens = sum(doc.length for doc in row)
             processed += row_tokens
             self.counter.add_completion(sum(doc.loss_tokens for doc in row))
@@ -131,9 +146,12 @@ class SftTrainer(Trainer):
         self._release_cache()
         grad_norm = self.optimizer.clip_grad_norm(float(self.cfg.optim.max_grad_norm))
         lr = self.optimizer.scheduler_step(self.step_index)
-        self.optimizer.step()
+        with optimizer_clock.measure():
+            self.optimizer.step()
         self._release_cache()
         _synchronize()
+        loss_value = float(loss_sum) if loss_sum is not None else 0.0
+        speech_sum = float(speech_total) if speech_total is not None else 0.0
         elapsed = time.perf_counter() - started
         self.step_index += 1
         return SftMetrics(
@@ -151,6 +169,8 @@ class SftTrainer(Trainer):
             reserved_memory_gb=_peak_reserved_gb(),
             speech_frames=n_frames,
             speech_loss=speech_sum / n_frames if n_frames else 0.0,
+            forward_backward_time_s=row_clock.seconds(),
+            optimizer_time_s=optimizer_clock.seconds(),
         )
 
 
@@ -376,6 +396,7 @@ def _eval_step(
     """Evaluation at a step: NLL on the corpus test split and (with `sft.eval_tasks`) accuracy on `task.dataset`."""
     from .cli import _release_cuda_cache, _run_eval
 
+    started = time.perf_counter()
     row: dict[str, Any] = {}
     if test_docs:
         result = evaluate_nll(policy, test_docs, int(cfg.sft.max_tokens))
@@ -393,15 +414,19 @@ def _eval_step(
         if any(doc.speech_frames or (doc.media is not None and doc.media.audio) for doc in test_docs):
             from .speech_eval import evaluate_speech
 
+            speech_started = time.perf_counter()
             speech = evaluate_speech(
                 policy, test_docs, limit=int(cfg.eval.limit), out_dir=Path(artifacts.eval_dir) / f"speech-step-{step}"
             )
+            row["speech_eval_time_s"] = round(time.perf_counter() - speech_started, 2)
             _write_json(Path(artifacts.eval_dir) / f"speech-step-{step}.json", speech)
             row |= {key: value for key, value in speech.items() if key.startswith("eval_")}
     if cfg.sft.eval_tasks:
         _run_eval(cfg, policy, artifacts, step)
     gc.collect()
     _release_cuda_cache()
+    if row:
+        row["eval_time_s"] = round(time.perf_counter() - started, 2)
     return row
 
 

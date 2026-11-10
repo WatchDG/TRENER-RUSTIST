@@ -17,6 +17,7 @@ group and the two roles of a task share it — and encoders of frozen groups run
 from __future__ import annotations
 
 import json
+import weakref
 from collections.abc import Callable, Sequence
 from contextlib import nullcontext
 from dataclasses import dataclass
@@ -155,8 +156,12 @@ def load_media_encoder(
     image_min_tokens: int,
     image_max_tokens: int,
     audio_max_seconds: float,
+    cache_gb: float | None = None,
 ) -> MediaEncoder | None:
-    """The media encoders of a checkpoint (`None` — a text-only model)."""
+    """The media encoders of a checkpoint (`None` — a text-only model).
+
+    `cache_gb` — host memory of the cache of each encoder, GiB (`None` — the defaults of `vision` and `audio`).
+    """
     model_path = Path(model_path)
     architecture = read_architecture(model_path)
     if not architecture.multimodal:
@@ -166,16 +171,21 @@ def load_media_encoder(
     config = json.loads((model_path / "config.json").read_text(encoding="utf-8"))
     processor = AutoProcessor.from_pretrained(str(model_path), trust_remote_code=True)
     images = audio = None
+    cache = {} if cache_gb is None else {"cache_bytes": int(cache_gb * (1 << 30))}
     if architecture.vision:
         images = ImageEncoder(
             processor.image_processor,
             image_token_id=int(config["image_token_id"]),
             min_tokens=image_min_tokens,
             max_tokens=image_max_tokens,
+            **cache,
         )
     if architecture.hearing:
         audio = AudioEncoder(
-            processor.feature_extractor, audio_token_id=int(config["audio_token_id"]), max_seconds=audio_max_seconds
+            processor.feature_extractor,
+            audio_token_id=int(config["audio_token_id"]),
+            max_seconds=audio_max_seconds,
+            **cache,
         )
     codec = load_codec(model_path, processor) if architecture.speaking else None
     return MediaEncoder(
@@ -190,14 +200,22 @@ def load_media_encoder(
     )
 
 
+_TRAINABLE: weakref.WeakKeyDictionary[Any, dict[tuple[str, ...], bool]] = weakref.WeakKeyDictionary()
+
+
 def _trainable(model: Any, architecture: Architecture, groups: Sequence[str]) -> bool:
-    """Some parameter of the module groups `groups` receives a gradient."""
-    prefixes = architecture.prefixes(groups)
-    return any(
-        param.requires_grad
-        for name, param in model.named_parameters()
-        if any(name == prefix or name.startswith(prefix + ".") for prefix in prefixes)
-    )
+    """Some parameter of the module groups `groups` receives a gradient (the answer is kept per model:
+    which parameters train is fixed when the policy is built)."""
+    known = _TRAINABLE.setdefault(model, {})
+    key = tuple(groups)
+    if key not in known:
+        prefixes = architecture.prefixes(groups)
+        known[key] = any(
+            param.requires_grad
+            for name, param in model.named_parameters()
+            if any(name == prefix or name.startswith(prefix + ".") for prefix in prefixes)
+        )
+    return known[key]
 
 
 def _encode_distinct(

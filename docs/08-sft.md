@@ -208,7 +208,8 @@ The preset `configs/sft_rust_std.yaml`:
 ## 6. Artifacts and checks
 
 - `metrics.jsonl`: `loss`, `loss_tokens`, `processed_tokens`, `rows`, `documents`,
-  `grad_norm`, `lr`, `update_tok_s`, `epoch`. On evaluation steps, also `eval_nll`.
+  `grad_norm`, `lr`, `update_tok_s`, `epoch`; with `run.profile=true` also `forward_backward_time_s` and
+  `optimizer_time_s`. On evaluation steps, also `eval_nll` and `eval_time_s`.
   The `step: 0` row is the NLL of the initial weights.
 - `eval/nll-step-<N>.json` — NLL on the corpus `test` split, overall and per item.
 - `coverage.json` — how many loss tokens and presentations each item received;

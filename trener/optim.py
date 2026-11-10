@@ -325,9 +325,13 @@ def build_optimizer(cfg: JoltConfig, policy: Policy) -> OptimizerHandle:
             )
             logger.warning("bitsandbytes is unavailable (%s) — falling back to Adafactor", exc)
             backend = "adafactor"
-            optimizer = FunctionalAdafactor(policy.n_master, lr=float(cfg.optim.lr), lr_scales=scales)
+            optimizer = FunctionalAdafactor(
+                policy.n_master, lr=float(cfg.optim.lr), lr_scales=scales, fused=bool(cfg.optim.fused_step)
+            )
     else:
-        optimizer = FunctionalAdafactor(policy.n_master, lr=float(cfg.optim.lr), lr_scales=scales)
+        optimizer = FunctionalAdafactor(
+            policy.n_master, lr=float(cfg.optim.lr), lr_scales=scales, fused=bool(cfg.optim.fused_step)
+        )
 
     handle = OptimizerHandle(
         optimizer=optimizer,

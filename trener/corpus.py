@@ -49,6 +49,7 @@ import numpy as np
 
 from .chat_format import NO_THINKING
 from .data import MEDIA_FIELDS, DataError, image_files_seal, parse_media_paths
+from .filehash import file_sha256
 from .media import Media, MediaEncoder, user_content
 
 logger = logging.getLogger(__name__)
@@ -151,11 +152,7 @@ class TokenizeStats:
 
 
 def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for block in iter(lambda: stream.read(1 << 20), b""):
-            digest.update(block)
-    return digest.hexdigest()
+    return file_sha256(path)
 
 
 def read_corpus_manifest(corpus_dir: str | Path) -> dict[str, Any]:

@@ -30,6 +30,9 @@ import soundfile
 import torch
 
 ROOT = Path(__file__).resolve().parent.parent
+#: Frames per second of the codec and the most frames one recording may have (48 s).
+FRAME_RATE = 12.5
+MAX_FRAMES = 600
 sys.path.insert(0, str(ROOT))
 
 from trener.audio import resample  # noqa: E402
@@ -63,17 +66,18 @@ class Voice:
         ).to("cuda")
 
     @torch.no_grad()
-    def speak(self, prompts: list[tuple[str, str]], seed: int) -> list[torch.Tensor]:
-        """24 kHz samples of each `(system, text)`."""
+    def speak(self, prompts: list[tuple[str, str]], limits: list[int], seed: int) -> list[torch.Tensor]:
+        """24 kHz samples of each `(system, text)`; `limits` — the most frames of each (a batch takes its largest)."""
         waves: list[torch.Tensor] = []
         for start in range(0, len(prompts), self.batch):
             chunk = prompts[start : start + self.batch]
+            limit = max(limits[start : start + self.batch])
             inputs = self._inputs(
                 [[{"role": "system", "content": s}, {"role": "user", "content": t}] for s, t in chunk]
             )
             torch.manual_seed(seed + start)
             out = self.model.generate(
-                **inputs, max_new_tokens=600, generation_mode="audio", return_dict_in_generate=True
+                **inputs, max_new_tokens=limit, generation_mode="audio", return_dict_in_generate=True
             )
             for row in range(len(chunk)):
                 frames = out.audio_codes[row : row + 1, :, : int(out.audio_lengths[row])]
@@ -131,7 +135,7 @@ def main() -> None:
     parser.add_argument("--samples", type=int, default=2, help="candidates per text")
     parser.add_argument("--max-cer", type=float, default=0.05, help="worst kept round trip error")
     parser.add_argument("--limit", type=int, default=0, help="texts per split (0 — all)")
-    parser.add_argument("--batch", type=int, default=16)
+    parser.add_argument("--batch", type=int, default=32)
     parser.add_argument("--with-asr", action="store_true", help="copy the recognition records of the source")
     args = parser.parse_args()
 
@@ -149,28 +153,46 @@ def main() -> None:
         ]
         if args.limit:
             speech = speech[: args.limit]
+        # the longest texts go together: a batch runs until its longest recording ends
+        speech.sort(key=lambda record: len(record.fields["text"]))
         prompts = [(record.fields["system"], record.fields["text"]) for record in speech]
-        best: list[tuple[float, torch.Tensor, str] | None] = [None] * len(speech)
+        # the source recording of a text tells how long its speech is: twice that and a margin is the limit
+        limits = [
+            min(MAX_FRAMES, int(2 * soundfile.info(record.speech).duration * FRAME_RATE) + 25) for record in speech
+        ]
+        directory = out / "audio" / "self"
+        directory.mkdir(parents=True, exist_ok=True)
+        # best candidate of every text: (round trip error, transcript); saved next to the recording, so a rerun resumes
+        best: list[tuple[float, str] | None] = [None] * len(speech)
+        for index, record in enumerate(speech):
+            sidecar = directory / f"{record.record_id}.json"
+            if sidecar.is_file() and (directory / f"{record.record_id}.wav").is_file():
+                saved = json.loads(sidecar.read_text(encoding="utf-8"))
+                best[index] = (float(saved["cer"]), str(saved["heard"]))
         for sample in range(args.samples):
-            waves = voice.speak(prompts, seed=1_000_003 * sample)
-            heard = voice.hear(
-                [(asr_prompt(system) or "", wave) for (system, _), wave in zip(prompts, waves, strict=True)]
-            )
-            for index, (wave, transcript) in enumerate(zip(waves, heard, strict=True)):
+            todo = [i for i, entry in enumerate(best) if entry is None or entry[0] > args.max_cer]
+            if not todo:
+                break
+            waves = voice.speak([prompts[i] for i in todo], [limits[i] for i in todo], seed=1_000_003 * sample)
+            heard = voice.hear([(asr_prompt(prompts[i][0]) or "", wave) for i, wave in zip(todo, waves, strict=True)])
+            for index, wave, transcript in zip(todo, waves, heard, strict=True):
                 cer = char_error_rate(transcript, prompts[index][1]) if wave.numel() else 1.0
                 if best[index] is None or cer < best[index][0]:
-                    best[index] = (cer, wave, transcript)
+                    best[index] = (cer, transcript)
+                    name = speech[index].record_id
+                    if wave.numel():
+                        soundfile.write(str(directory / f"{name}.wav"), wave.numpy(), 24_000, subtype="PCM_16")
+                        (directory / f"{name}.json").write_text(
+                            json.dumps({"cer": cer, "heard": transcript}, ensure_ascii=False), encoding="utf-8"
+                        )
             kept = sum(1 for entry in best if entry is not None and entry[0] <= args.max_cer)
             print(f"{split}: sample {sample + 1}/{args.samples}, kept {kept}/{len(speech)}", flush=True)
         rows: list[dict[str, Any]] = []
-        directory = out / "audio" / "self"
-        directory.mkdir(parents=True, exist_ok=True)
         for record, entry in zip(speech, best, strict=True):
             if entry is None or entry[0] > args.max_cer:
                 continue
-            cer, wave, transcript = entry
+            cer, transcript = entry
             name = f"{record.record_id}.wav"
-            soundfile.write(str(directory / name), wave.numpy(), 24_000, subtype="PCM_16")
             rows.append(
                 {
                     "id": f"self-{record.record_id}",

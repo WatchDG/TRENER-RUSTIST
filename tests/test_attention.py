@@ -166,3 +166,60 @@ def test_packed_gradients_with_checkpointing(policy: Any) -> None:
     scale = max(float(g.abs().max()) for g in reference)
     for expected, actual in zip(reference, packed, strict=True):
         assert (actual - expected).abs().max() <= 1e-4 * max(1.0, scale)
+
+
+def test_checkpoint_free_layers_do_not_change_gradients(policy: Any) -> None:
+    """The last decoder layers run without checkpointing: the same gradients, the flags set on those layers only."""
+    from trener.architectures import architecture_of
+
+    items = _items(3)
+    weights = [torch.linspace(0.5, 1.5, len(completion)) for _, completion in items]
+
+    def gradient() -> list[torch.Tensor]:
+        policy.model.zero_grad(set_to_none=True)
+        policy.model.train()
+        values = score_sequences(policy, items, grad=True, micro_batch_size=len(items), max_tokens=10_000)
+        sum((value * weight).sum() for value, weight in zip(values, weights, strict=True)).backward()  # type: ignore[union-attr]
+        policy.model.eval()
+        return [p.grad.detach().clone() for p in policy.model.parameters() if p.grad is not None]
+
+    layers = list(architecture_of(policy.model).decoder_layers(policy.model))
+    try:
+        policy.set_gradient_checkpointing(True)
+        reference = gradient()
+        policy.set_gradient_checkpointing(False)
+        policy.set_gradient_checkpointing(True, free_layers=2)
+        assert [layer.gradient_checkpointing for layer in layers] == [True] * (len(layers) - 2) + [False] * 2
+        partial = gradient()
+    finally:
+        policy.set_gradient_checkpointing(False)
+        policy.model.zero_grad(set_to_none=True)
+    scale = max(float(g.abs().max()) for g in reference)
+    for expected, actual in zip(reference, partial, strict=True):
+        assert (actual - expected).abs().max() <= 1e-4 * max(1.0, scale)
+
+
+@pytest.mark.parametrize("window", [None, 8])
+@pytest.mark.parametrize(
+    "documents",
+    [
+        [9, 9, 9, 9],  # one bucket of equal lengths
+        [30, 28, 25, 24, 7, 6, 6, 5, 1, 1, 2],  # several buckets, a single-document bucket, shuffled sizes
+        [3, 40, 3, 22, 21, 3, 17],  # buckets are not in row order
+    ],
+)
+def test_bucketed_documents_match_block_mask(window: int | None, documents: list[int]) -> None:
+    """Documents of similar length share one SDPA call; values and gradients equal the block-mask result."""
+    total = sum(documents)
+    inputs = _qkv(total, total, grad=True)
+    expected, _ = sdpa_attention_forward(_module(), *inputs, _block_mask(documents, window), scaling=0.25)
+    expected_grads = torch.autograd.grad(expected.square().sum(), inputs)
+
+    inputs = _qkv(total, total, grad=True)
+    actual, _ = jolt_sdpa_attention(
+        _module(), *inputs, None, scaling=0.25, sliding_window=window, **{DOCUMENTS_KWARG: tuple(documents)}
+    )
+    actual_grads = torch.autograd.grad(actual.square().sum(), inputs)
+    assert torch.allclose(actual, expected, atol=1e-5)
+    for got, want in zip(actual_grads, expected_grads, strict=True):
+        assert torch.allclose(got, want, atol=1e-4)
