@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-11-10
+
+### Added
+
+- `model.conv_kernel` (`trener/conv.py`): Triton kernels for the LFM3 short convolution of a packed row with
+  gradients (forward, input and weight gradients) instead of `unfold` + `einsum`; off by default.
+- `sft.fused_loss` (`trener/head.py`): fused loss head — `lm_head` gradients computed in the forward pass by one
+  Triton kernel and two matmuls, without the second `lm_head` matmul and the fp32 logits; off by default.
+- `scripts/profile_sft.py`: step times, `torch.profiler` operations by category and `--sync-debug` for the `sft` step.
+- `docs/07-usage.md` §7.14: the measurements.
+
+### Changed
+
+- Packed rows no longer synchronize with the host: bucketed attention gathers by integer positions, the row tensors
+  are copied from pinned memory before the forward, the gradient norm and clipping are multi-tensor (219 → 27
+  synchronizations per step). Text SFT step −5%, Omni speech SFT −14%, JOLT −2%.
+- `configs/sft_rust_std.yaml` enables `conv_kernel`, `fused_loss`, `checkpoint_free_layers: 12` and disables
+  `release_cache`: step 4.26 s → 3.26 s (−23%) at the same reserved VRAM.
+
 ## [0.11.0] - 2026-11-10
 
 ### Added
@@ -291,7 +310,8 @@ First release.
 - Tests that need the LFM3 tokenizer are skipped when `models/LFM3-1.7B` is
   absent instead of failing.
 
-[Unreleased]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.8.0...v0.9.0

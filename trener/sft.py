@@ -126,6 +126,8 @@ class SftTrainer(Trainer):
                     grad=True,
                     max_tokens=max_tokens,
                     speech=speech,
+                    # every text token has the weight `text_weight`: one gradient for all log-probabilities
+                    fused_head=bool(self.cfg.sft.fused_loss),
                     **_document_kwargs(row),
                 )
             logps = torch.cat([value.reshape(-1) for value in values])

@@ -38,9 +38,6 @@ if TYPE_CHECKING:  # pragma: no cover - for typing only
 
 logger = logging.getLogger(__name__)
 
-#: Number of gradient elements processed at a time when computing the norm.
-_NORM_CHUNK = 1 << 22
-
 
 @dataclass
 class OptimizerHandle:
@@ -91,15 +88,19 @@ class OptimizerHandle:
         The sum of squares is accumulated on the device: one GPU synchronization per step,
         not one per chunk of each parameter.
         """
+        grads = [param.grad for param in self.policy.model.parameters() if param.grad is not None]
+        if not grads:
+            return 0.0
+        by_device: dict[torch.device, list[torch.Tensor]] = {}
+        for grad in grads:
+            by_device.setdefault(grad.device, []).append(grad)
         total: torch.Tensor | None = None
-        for param in self.policy.model.parameters():
-            grad = param.grad
-            if grad is None:
-                continue
-            for chunk in grad.reshape(-1).split(_NORM_CHUNK):
-                part = torch.sum(chunk.float().square())
-                total = part if total is None else total + part
-        return math.sqrt(float(total)) if total is not None else 0.0
+        for device_grads in by_device.values():
+            # one multi-tensor kernel per device instead of a reduction per chunk of every parameter
+            norms = torch._foreach_norm(device_grads, 2, dtype=torch.float32)
+            part = torch.stack(norms).square().sum()
+            total = part if total is None else total + part.to(total.device)
+        return math.sqrt(float(total))
 
     def clip_grad_norm(self, max_norm: float, grad_scale: float = 1.0) -> float:
         """Clips the gradient norm; returns the norm before clipping.
@@ -117,9 +118,9 @@ class OptimizerHandle:
         else:
             scale = grad_scale * min(1.0, max_norm / (norm + 1e-6))
         if scale != 1.0:
-            for param in self.policy.model.parameters():
-                if param.grad is not None:
-                    param.grad.mul_(scale)
+            grads = [param.grad for param in self.policy.model.parameters() if param.grad is not None]
+            if grads:
+                torch._foreach_mul_(grads, scale)
         return norm
 
     def step(self) -> None:

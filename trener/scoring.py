@@ -43,6 +43,7 @@ import torch
 from torch.utils.checkpoint import checkpoint
 
 from .attention import DOCUMENTS_KWARG
+from .head import fused_head_applies, fused_logprobs
 from .media import Media, has_media, media_embeds
 from .speech import frame_losses
 
@@ -127,8 +128,14 @@ def _flat_logprobs(
     chunk: int,
     grad: bool,
     bias: torch.Tensor | None = None,
+    fused: bool = False,
 ) -> torch.Tensor:
-    """Log-probabilities of the targets over a flat list of positions (`lm_head` in chunks)."""
+    """Log-probabilities of the targets over a flat list of positions (`lm_head` in chunks).
+
+    `fused` — the fused head (`trener.head`) where it applies: with gradient, without `bias`, on CUDA.
+    """
+    if fused and grad and bias is None and fused_head_applies(hidden, lm_head):
+        return fused_logprobs(hidden, targets, lm_head, chunk)
     pieces = [
         _chunk_logprobs(
             hidden[offset : offset + chunk], targets[offset : offset + chunk], lm_head, use_checkpoint=grad, bias=bias
@@ -269,6 +276,14 @@ def _score_speech(
         speech.values[owner] = value if grad else value.detach()
 
 
+def _long_tensor(values: Sequence[int], device: torch.device) -> torch.Tensor:
+    """int64 vector on `device`; on CUDA through pinned memory, so the copy does not wait for the GPU."""
+    tensor = torch.tensor(values, dtype=torch.long)
+    if device.type != "cuda":
+        return tensor.to(device)
+    return tensor.pin_memory().to(device, non_blocking=True)
+
+
 def _kept_positions(completion: Sequence[int], mask: Sequence[bool] | None) -> list[int]:
     """Completion positions for which logp is computed: all, or only those with `True` in the mask."""
     if mask is None:
@@ -289,6 +304,7 @@ def score_sequences(
     media: Sequence[Media | None] | None = None,
     text_mode: bool = False,
     speech: SpeechLosses | None = None,
+    fused_head: bool = False,
 ) -> list[torch.Tensor]:
     """Computes the log-probabilities of completion tokens for a set of (prompt, completion) pairs.
 
@@ -313,6 +329,9 @@ def score_sequences(
     `text_mode` — the completions are text answers of the decoding (`Policy.text_bias`): the tokens the
     decoding never samples get −inf. `speech` (optional) receives the losses of the speech frames of the
     completions (`SpeechLosses`).
+
+    `fused_head` (with `grad`) — the fused loss head (`trener.head.fused_logprobs`): the caller guarantees that
+    every returned log-probability gets the same gradient (an SFT loss with one weight per token).
     """
     if not items:
         return []
@@ -332,7 +351,9 @@ def score_sequences(
     lm_head = policy.model.lm_head
     bias = policy.text_bias(int(lm_head.weight.shape[0])) if text_mode else None
     if max_tokens > 0:
-        return _score_packed(policy, items, grad, int(max_tokens), groups, stats, masks, entries, bias, speech)
+        return _score_packed(
+            policy, items, grad, int(max_tokens), groups, stats, masks, entries, bias, speech, fused_head
+        )
 
     device = policy.device
     base = _base_model(policy)
@@ -400,7 +421,7 @@ def score_sequences(
                 targets = torch.tensor(target_ids, dtype=torch.long, device=device)
                 # completion positions of the whole micro-batch as one flat tensor
                 hidden = hidden_states[row_index, column_index]
-                flat = _flat_logprobs(hidden, targets, lm_head, chunk, grad, bias)
+                flat = _flat_logprobs(hidden, targets, lm_head, chunk, grad, bias, fused_head)
                 values = list((flat if grad else flat.detach()).split(completion_lengths))
             else:
                 values = [torch.zeros(0, dtype=torch.float32, device=device) for _ in batch]
@@ -420,6 +441,7 @@ def _score_packed(
     media: Sequence[Media | None] | None = None,
     bias: torch.Tensor | None = None,
     speech: SpeechLosses | None = None,
+    fused_head: bool = False,
 ) -> list[torch.Tensor]:
     """Packed scoring: one forward pass over one row of sequences from a single group."""
     device = policy.device
@@ -459,8 +481,11 @@ def _score_packed(
         add_stat(stats, "real_tokens", len(token_ids))
         add_stat(stats, "batch_tokens", len(token_ids))
 
-        input_ids = torch.tensor([token_ids], dtype=torch.long, device=device)
-        positions = torch.tensor([position_ids], dtype=torch.long, device=device)
+        # all four before the forward and without waiting for the GPU: the previous row's backward keeps running
+        input_ids = _long_tensor(token_ids, device)[None]
+        positions = _long_tensor(position_ids, device)[None]
+        column_index = _long_tensor(columns, device)
+        targets = _long_tensor(target_ids, device)
         documents = tuple(len(items[index][0]) + len(items[index][1]) for index in members)
         context = torch.enable_grad() if grad else torch.no_grad()
         with context:
@@ -481,9 +506,7 @@ def _score_packed(
                     grad,
                 )
             if target_ids:
-                column_index = torch.tensor(columns, dtype=torch.long, device=device)
-                targets = torch.tensor(target_ids, dtype=torch.long, device=device)
-                flat = _flat_logprobs(hidden_states[column_index], targets, lm_head, chunk, grad, bias)
+                flat = _flat_logprobs(hidden_states[column_index], targets, lm_head, chunk, grad, bias, fused_head)
                 values = list((flat if grad else flat.detach()).split(completion_lengths))
             else:
                 values = [torch.zeros(0, dtype=torch.float32, device=device) for _ in members]

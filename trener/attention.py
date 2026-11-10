@@ -72,7 +72,7 @@ class _Bucket(NamedTuple):
     length: int
     start: int
     index: torch.Tensor | None  # [n, length] row positions (the padding repeats the last real token)
-    valid: torch.Tensor | None  # [n, length] True on the real tokens
+    valid: torch.Tensor | None  # [real tokens] flat positions of the real tokens in `[n · length]`
 
 
 class _Plan(NamedTuple):
@@ -82,6 +82,13 @@ class _Plan(NamedTuple):
 
 _PLANS: OrderedDict[tuple[tuple[int, ...], str], _Plan] = OrderedDict()
 _MASKS: dict[tuple[int, int, str], torch.Tensor] = {}
+
+
+def _to_device(tensor: torch.Tensor, device: torch.device) -> torch.Tensor:
+    """Host tensor → `device` without waiting for the GPU: a copy from pinned memory on CUDA."""
+    if device.type != "cuda":
+        return tensor.to(device)
+    return tensor.pin_memory().to(device, non_blocking=True)
 
 
 def _bucket_plan(documents: Sequence[int], device: torch.device) -> _Plan:
@@ -117,11 +124,13 @@ def _bucket_plan(documents: Sequence[int], device: torch.device) -> _Plan:
         columns = torch.arange(top)[None, :]
         valid = columns < sizes
         index = offsets + torch.minimum(columns, sizes - 1)
-        buckets.append(_Bucket(top, 0, index.to(device), valid.to(device)))
+        # integer positions, not a boolean mask: indexing by a mask on the device waits for the GPU (`nonzero`)
+        real = valid.reshape(-1).nonzero()[:, 0]
+        buckets.append(_Bucket(top, 0, _to_device(index, device), _to_device(real, device)))
         destinations.append(index[valid])
     inverse = None
     if len(buckets) > 1 or buckets[0].index is not None:
-        inverse = torch.argsort(torch.cat(destinations)).to(device)
+        inverse = _to_device(torch.argsort(torch.cat(destinations)), device)
     plan = _Plan(tuple(buckets), inverse)
     _PLANS[key] = plan
     while len(_PLANS) > _PLAN_CACHE_SIZE:
@@ -158,7 +167,8 @@ def _document_attention(
     sees only the keys `≤ i`, which are real, so the padding changes nothing. A document of a unique length is
     a call of its own. Sliding window — as in `transformers`: key `j` is visible to query `i` if `i − W < j ≤ i`.
     """
-    groups = query.shape[1] // key.shape[1]
+    heads = query.shape[1]
+    groups = heads // key.shape[1]
     plan = _bucket_plan(documents, query.device)
     outputs = []
     for bucket in plan.buckets:
@@ -182,7 +192,8 @@ def _document_attention(
         if bucket.index is None:
             outputs.append(result[0].transpose(0, 1))  # [L, H, D]
         else:
-            outputs.append(result.transpose(1, 2)[bucket.valid])  # [real tokens, H, D]
+            flat = result.transpose(1, 2).reshape(-1, heads, result.shape[-1])  # [n · L, H, D]
+            outputs.append(flat.index_select(0, bucket.valid))  # [real tokens, H, D]
     if plan.inverse is None:
         return outputs[0].unsqueeze(0).contiguous(), None
     return torch.cat(outputs)[plan.inverse].unsqueeze(0).contiguous(), None

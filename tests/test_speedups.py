@@ -48,3 +48,6 @@ def test_speed_settings_default_to_the_reference_behaviour() -> None:
     validate_config(cfg)
     assert JoltConfig().model.checkpoint_free_layers == 0 and JoltConfig().optim.fused_step is False
     assert cfg.to_dict()["model"]["checkpoint_free_layers"] == 8 and cfg.to_dict()["optim"]["fused_step"] is True
+    assert JoltConfig().model.conv_kernel is False and JoltConfig().sft.fused_loss is False
+    defaults = JoltConfig().to_dict()
+    assert defaults["model"]["conv_kernel"] is False and defaults["sft"]["fused_loss"] is False

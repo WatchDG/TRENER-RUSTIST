@@ -2,13 +2,13 @@
 # Corpus is prepared in advance: python scripts/build_rustdoc_corpus.py --out datasets/rust-docs/rust-std-docs-0001
 # Epoch size in steps: python -m trener data validate-corpus datasets/rust-docs/rust-std-docs-0001 --config configs/sft_rust_std.yaml
 # Corpus: 4795 items, 28.9k documents, 1.83M loss tokens (2.41M total); 8 rows of 4096 tokens per step —
-# 589 rows, ~74 steps per epoch; 296 steps ≈ 4 epochs (~6 s per step on RTX 4090, peak VRAM ≈ 12.6 GB).
+# 589 rows, ~74 steps per epoch; 296 steps ≈ 4 epochs (~3.3 s per step on RTX 4090, peak VRAM ≈ 15.6 GB, reserved ≈ 18 GB).
 run:
   name: rust_std_docs_lfm3_sft
   seed: 0
   out_dir: runs
   checkpoint_every_epochs: 1
-  release_cache: true
+  release_cache: false   # step −4%; with the fused head the reserve stays at ≈ 18 GB (docs/07-usage.md §7.14)
   pinned_checkpoint: true
 method: sft
 model:
@@ -18,7 +18,8 @@ model:
   attn_implementation: sdpa
   gradient_checkpointing: true
   compile_kernels: true
-  checkpoint_free_layers: 8   # the last 8 of 24 layers are not recomputed in backward: step −5%, reserved VRAM 14.4 → 17.5 GB (docs/07-usage.md §7.13)
+  checkpoint_free_layers: 12  # the last 12 of 24 layers are not recomputed in backward (docs/07-usage.md §7.13, §7.14)
+  conv_kernel: true           # Triton short convolution with gradients instead of unfold + einsum (§7.14)
 sft:
   corpus: datasets/rust-docs/rust-std-docs-0001
   max_tokens: 4096
@@ -27,6 +28,7 @@ sft:
   # replay: datasets/rust-docs/replay-lfm3
   # replay_ratio: 0.15
   eval_tasks: false
+  fused_loss: true   # lm_head gradients in the forward pass: no second lm_head matmul, no fp32 logits (§7.14)
 optim:
   lr: 2.0e-5               # 20x higher than JOLT: this stage adds new facts rather than reshaping the answer format
   optimizer: adafactor

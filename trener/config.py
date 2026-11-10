@@ -140,6 +140,9 @@ class ModelConfig:
     #: The last decoder layers that are not recomputed in backward (their activations stay in memory: faster, more
     #: VRAM; 0 — every layer is checkpointed; requires `gradient_checkpointing`).
     checkpoint_free_layers: int = 0
+    #: Short convolution of a packed row with gradients through Triton kernels (`trener.conv`) instead of `unfold` +
+    #: `einsum` (LFM3 `conv` layers; CUDA and Triton only).
+    conv_kernel: bool = False
     #: Module groups trained without LoRA (`language`, `vision`, `projector` — `trener.architectures`); empty — all
     #: groups of the model. The other groups are frozen and get no master weights.
     trainable: list[str] = field(default_factory=list)
@@ -163,6 +166,7 @@ class ModelConfig:
             "compile_kernels": self.compile_kernels,
             "selective_checkpointing": self.selective_checkpointing,
             "checkpoint_free_layers": self.checkpoint_free_layers,
+            "conv_kernel": self.conv_kernel,
             "trainable": list(self.trainable),
             "image_min_tokens": self.image_min_tokens,
             "image_max_tokens": self.image_max_tokens,
@@ -443,6 +447,9 @@ class SftConfig:
     #: the weighted counts, as the checkpoint's `combined_loss`.
     text_loss_weight: float = 1.0
     speech_loss_weight: float = 1.0
+    #: Fused loss head (`trener.head`): the `lm_head` gradients are computed in the forward pass, without the second
+    #: `lm_head` matmul and the fp32 logits (CUDA and Triton; otherwise the reference head).
+    fused_loss: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -454,6 +461,7 @@ class SftConfig:
             "eval_tasks": self.eval_tasks,
             "text_loss_weight": self.text_loss_weight,
             "speech_loss_weight": self.speech_loss_weight,
+            "fused_loss": self.fused_loss,
         }
 
 

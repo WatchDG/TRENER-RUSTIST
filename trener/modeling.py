@@ -540,6 +540,17 @@ def load_policy(cfg: JoltConfig, *, with_master: bool = True) -> Policy:
                 RuntimeWarning,
                 stacklevel=2,
             )
+    if cfg.model.conv_kernel:
+        from .conv import use_conv_kernel
+
+        skip = architecture_of(policy.model).prefixes(MEDIA_GROUPS)
+        policy.info["conv_kernel"] = use_conv_kernel(policy.model, skip=skip) if device.type == "cuda" else 0
+        if not policy.info["conv_kernel"]:
+            warnings.warn(
+                "model.conv_kernel: requires CUDA, Triton and short-convolution layers — the torch path stays",
+                RuntimeWarning,
+                stacklevel=2,
+            )
     return policy
 
 
