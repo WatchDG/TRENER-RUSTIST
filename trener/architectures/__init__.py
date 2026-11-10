@@ -1,12 +1,13 @@
 """Model architectures: what the pipeline does differently for each of them.
 
 The architecture of a model is the `architectures` field of its `config.json` — `Lfm3ForCausalLM` (LFM3),
-`Lfm3VlForConditionalGeneration` (LFM3-VL), `Spark2_5ForCausalLM` (Spark-X2.6), `LlamaForCausalLM` (MiniCPM5) — not
+`Lfm3VlForConditionalGeneration` (LFM3-VL), `Lfm3OmniForConditionalGeneration` (LFM3-Omni),
+`Spark2_5ForCausalLM` (Spark-X2.6), `LlamaForCausalLM` (MiniCPM5) — not
 its name or directory. Every architecture is
 described in its own module (`trener/architectures/<architecture>.py`, `Architecture`): how its model is built — by
 the checkpoint's code (`trust_remote_code`), by `transformers` or by the pipeline's own implementation — where its
 decoder layers are, which modules of a decoder layer write into the residual stream and which module groups
-(`language`, `vision`, `projector`) it has. An architecture without its own module gets `GENERIC`:
+(`language`, `vision`, `projector`, `audio`, `voice`) it has. An architecture without its own module gets `GENERIC`:
 `AutoModelForCausalLM` and the Llama module names.
 """
 
@@ -17,13 +18,19 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-from . import lfm3, lfm3_vl, llama, spark2_5
-from .base import GENERIC, LANGUAGE, MODULE_GROUPS, PROJECTOR, VISION, Architecture
+from . import lfm3, lfm3_omni, lfm3_vl, llama, spark2_5
+from .base import AUDIO, GENERIC, LANGUAGE, MEDIA_GROUPS, MODULE_GROUPS, PROJECTOR, VISION, VOICE, Architecture
 
 #: Architectures with their own description, by name from `config.json`.
 ARCHITECTURES: dict[str, Architecture] = {
     architecture.name: architecture
-    for architecture in (lfm3.ARCHITECTURE, lfm3_vl.ARCHITECTURE, llama.ARCHITECTURE, spark2_5.ARCHITECTURE)
+    for architecture in (
+        lfm3.ARCHITECTURE,
+        lfm3_omni.ARCHITECTURE,
+        lfm3_vl.ARCHITECTURE,
+        llama.ARCHITECTURE,
+        spark2_5.ARCHITECTURE,
+    )
 }
 
 
@@ -60,11 +67,14 @@ def builds_by_remote_code(model: Any) -> bool:
 
 __all__ = [
     "ARCHITECTURES",
+    "AUDIO",
     "GENERIC",
     "LANGUAGE",
+    "MEDIA_GROUPS",
     "MODULE_GROUPS",
     "PROJECTOR",
     "VISION",
+    "VOICE",
     "Architecture",
     "architecture_names",
     "architecture_of",

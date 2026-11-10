@@ -32,8 +32,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+from .media import Media, MediaEncoder, user_content
 from .rewards import PHRASE_SEPARATOR
-from .vision import ImageEncoder, Images, expand_image_tokens, image_message
 
 #: System instruction shared by both roles, for tasks with a numeric or text answer
 #: (first line of the §4.5 format).
@@ -148,9 +148,9 @@ class PromptPair:
     """Prompt pair for one task: the student prompt and the teacher prompt.
 
     ``student_ids``/``teacher_ids`` are the prompt token ids (without the generated continuation);
-    ``student_text``/``teacher_text`` are the same prompts as text. ``images`` are the task's images, shown to both
-    roles: their tokens are already expanded in the ids, the texts keep one ``<|image|>`` per image. For ``tutor``
-    mode tasks, ``user_reply`` is the user's reply between the model's turns and ``glue_ids`` are its tokens
+    ``student_text``/``teacher_text`` are the same prompts as text. ``media`` are the task's images and audio clips,
+    shown to both roles: their tokens are already expanded in the ids, the texts keep one placeholder per item. For
+    ``tutor`` mode tasks, ``user_reply`` is the user's reply between the model's turns and ``glue_ids`` are its tokens
     together with the turn boundaries (:func:`turn_glue_ids`); for regular tasks both fields are ``None``.
     """
 
@@ -161,7 +161,7 @@ class PromptPair:
     task_id: str | None = None
     user_reply: str | None = None
     glue_ids: list[int] | None = None
-    images: Images | None = None
+    media: Media | None = None
 
 
 def _resolve_source_type(task: Any, requested: str | None = None) -> str:
@@ -254,11 +254,13 @@ def student_system_prompt(answer_type: str) -> str:
         raise ValueError(f"answer_type={answer_type!r}; allowed: {list(STUDENT_SYSTEM_BY_ANSWER_TYPE)}") from None
 
 
-def _render(tokenizer: SupportsChatTemplate, system_prompt: str, question: str, n_images: int = 0) -> str:
-    """Renders the system and user prompts through the model's chat template (images before the question)."""
+def _render(
+    tokenizer: SupportsChatTemplate, system_prompt: str, question: str, n_images: int = 0, n_audio: int = 0
+) -> str:
+    """Renders the system and user prompts through the model's chat template (clips and images before the question)."""
     conversation = [
         {"role": "system", "content": system_prompt},
-        {"role": "user", "content": image_message(question, n_images)},
+        {"role": "user", "content": user_content(question, n_images, n_audio)},
     ]
     return tokenizer.apply_chat_template(
         conversation,
@@ -331,7 +333,7 @@ def build_prompts(
     task: Any,
     privileged: Any = None,
     tokenizer: SupportsChatTemplate | None = None,
-    images: ImageEncoder | None = None,
+    media: MediaEncoder | None = None,
 ) -> PromptPair:
     """Builds the prompt pair of a task: the student without `c`, the teacher with `c`.
 
@@ -344,8 +346,9 @@ def build_prompts(
             ``task.privileged`` is used, and if it is absent, the task's gold answer;
         tokenizer: the model's tokenizer; ``apply_chat_template`` is used for rendering and a plain call
             for encoding;
-        images: the image encoder of a vision-language model (`trener.vision`): the task's ``images`` are
-            shown to both roles before the question; a task with images and no encoder is an error.
+        media: the media encoders of a model with images or speech input (`trener.media`): the task's
+            ``audio`` and ``images`` are shown to both roles before the question; a task with media the model
+            cannot take is an error.
 
     Returns a :class:`PromptPair` with the texts and token ids of both roles. If private information
     leaks into the student context, :class:`PrivilegedLeakError` is raised; for an unknown
@@ -374,17 +377,18 @@ def build_prompts(
     private_block = (tutor_privileged_block if tutor else privileged_block)(value, reason)
     teacher_system = f"{student_system}\n{private_block}"
 
-    paths = tuple(getattr(task, "images", ()) or ())
-    if paths and images is None:
-        raise ValueError(
-            f"task {getattr(task, 'task_id', None)!r} has images, but the model has no vision tower (model.path)"
-        )
-    if paths and tutor:
-        raise ValueError("tutor-mode tasks cannot carry images")
-    pictures = images.describe(paths) if paths and images is not None else None
+    images = tuple(getattr(task, "images", ()) or ())
+    audio = tuple(getattr(task, "audio", ()) or ())
+    what = f"task {getattr(task, 'task_id', None)!r}"
+    if (images or audio) and tutor:
+        raise ValueError("tutor-mode tasks cannot carry images or audio")
+    if (images or audio) and media is None:
+        kind = "images" if images else "audio clips"
+        raise ValueError(f"{what} has {kind}, but the model takes no media (model.path)")
+    described = media.describe(images, audio, what=what) if media is not None else None
 
-    student_text = _render(tokenizer, student_system, question, len(paths))
-    teacher_text = _render(tokenizer, teacher_system, question, len(paths))
+    student_text = _render(tokenizer, student_system, question, len(images), len(audio))
+    teacher_text = _render(tokenizer, teacher_system, question, len(images), len(audio))
 
     _assert_no_leak(
         student_text,
@@ -402,9 +406,9 @@ def build_prompts(
         raise ValueError("tutor-mode task has no user reply (user_answer)")
     student_ids = _encode(tokenizer, student_text)
     teacher_ids = _encode(tokenizer, teacher_text)
-    if pictures is not None and images is not None:
-        student_ids = expand_image_tokens(student_ids, pictures, images.image_token_id)
-        teacher_ids = expand_image_tokens(teacher_ids, pictures, images.image_token_id)
+    if described is not None and media is not None:
+        student_ids = media.expand(student_ids, described)
+        teacher_ids = media.expand(teacher_ids, described)
     return PromptPair(
         student_ids=student_ids,
         teacher_ids=teacher_ids,
@@ -413,7 +417,7 @@ def build_prompts(
         task_id=str(task_id) if task_id is not None else None,
         user_reply=user_reply,
         glue_ids=turn_glue_ids(tokenizer, user_reply) if tutor else None,
-        images=pictures,
+        media=described,
     )
 
 

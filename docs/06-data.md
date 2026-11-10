@@ -36,6 +36,7 @@ One JSONL line is one task (UTF-8, LF line endings; a BOM is allowed):
 | `answer_type` | no | how the model's answer is checked: `number`, `text`, `choice` or `phrase` (§6.3); default — the manifest's `default_answer_type`, otherwise `number` |
 | `id` | no | an identifier unique within the split (string or integer); default `<split>-<record number from 0>` |
 | `images` | no | images shown to both roles before the question — a list of `png`/`jpg`/`jpeg`/`webp` files given as paths relative to the dataset directory, with `/` and without `..`; only for a vision-language model (LFM3-VL, [12-vision.md](12-vision.md)) |
+| `audio` | no | audio clips both roles hear before the question (a spoken question) — a list of `wav`/`flac`/`ogg`/`mp3` files given as paths relative to the dataset directory; only for a model with speech input (LFM3-Omni, [13-speech.md](13-speech.md)) |
 | `meta` | no | an arbitrary JSON object for your own notes; not used in training |
 
 Other keys are an error (typos are caught immediately: `reasons` — "the field is called `reason`").
@@ -126,8 +127,8 @@ ends up in the student prompt (except when it is part of the `question` itself).
 
 `records` and `sha256` are the dataset's **stamp**: on loading, the number of
 records and the file hash are checked against the manifest, so a file changed after
-the manifest was written will not load unnoticed. The images of the records (`images`) are stamped too: the number
-of distinct image files and the `sha256` of their relative paths and contents; a changed image is caught the same
+the manifest was written will not load unnoticed. The images and audio clips of the records (`images`, `audio`) are stamped too, each
+field apart: the number of distinct files and the `sha256` of their relative paths and contents; a changed image is caught the same
 way and is part of the dataset fingerprint in `env.txt`. The stamp is set by the command
 `validate --update-manifest` (§6.6); without it (`records`/`sha256` not set) the
 dataset loads, but `validate` warns.

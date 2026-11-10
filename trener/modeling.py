@@ -26,8 +26,7 @@ import torch
 import transformers
 
 from .architectures import (
-    PROJECTOR,
-    VISION,
+    MEDIA_GROUPS,
     architecture_names,
     architecture_of,
     builds_by_remote_code,
@@ -39,7 +38,7 @@ from .config import JoltConfig, LoraConfig
 from .fusion import fuse_model
 from .lora import LoraState, apply_lora
 from .master import merge_master, split_master_
-from .vision import ImageEncoder, load_image_encoder
+from .media import MediaEncoder, load_media_encoder
 
 _DTYPES: dict[str, torch.dtype] = {
     "bfloat16": torch.bfloat16,
@@ -121,8 +120,34 @@ class Policy:
     master_offload: bool = False
     #: LoRA adapters (`trener.lora`): the base is frozen, the master and the optimizer cover only the adapters.
     lora: LoraState | None = None
-    #: Image encoder of a vision-language model (`trener.vision`); `None` — a text-only model.
-    images: ImageEncoder | None = None
+    #: Media encoders of a model with images or speech (`trener.media`); `None` — a text-only model.
+    media: MediaEncoder | None = None
+    #: Logit bias of a text answer: −inf at the tokens a text answer never contains (`Architecture.text_suppress`);
+    #: `None` — nothing is suppressed. Built lazily on the device (`text_bias`).
+    _text_bias: torch.Tensor | None = field(default=None, repr=False)
+
+    @property
+    def stop_ids(self) -> tuple[int, ...]:
+        """Tokens that end a text answer: the tokenizer's EOS (the end of a turn) and the model's other stops."""
+        eos = getattr(self.tokenizer, "eos_token_id", None)
+        extra = architecture_of(self.model).stop_ids(self.model.config)
+        return tuple(dict.fromkeys([*([int(eos)] if eos is not None else []), *extra]))
+
+    @property
+    def suppressed_ids(self) -> tuple[int, ...]:
+        """Tokens never sampled in a text answer of this model."""
+        return architecture_of(self.model).suppressed_ids(self.model.config)
+
+    def text_bias(self, vocab: int) -> torch.Tensor | None:
+        """`[vocab]` float32 bias with −inf at `suppressed_ids` (`None` — nothing to suppress)."""
+        ids = self.suppressed_ids
+        if not ids:
+            return None
+        if self._text_bias is None or self._text_bias.shape[0] != vocab:
+            bias = torch.zeros(vocab, dtype=torch.float32, device=self.device)
+            bias[[index for index in ids if index < vocab]] = float("-inf")
+            self._text_bias = bias
+        return self._text_bias
 
     @property
     def n_master(self) -> int:
@@ -339,7 +364,7 @@ def build_policy(
     master_offload: bool = False,
     lora: LoraConfig | None = None,
     trainable: Sequence[str] = (),
-    images: ImageEncoder | None = None,
+    media: MediaEncoder | None = None,
 ) -> Policy:
     """Builds a `Policy` from a ready model and tokenizer.
 
@@ -350,7 +375,7 @@ def build_policy(
     (`trener.lora.apply_lora`) before the master is built: the master covers only the adapters. With
     `lora.quantize` (QLoRA) the linear layers are quantized on `device` before the model moves there, so their
     bf16 weights never occupy it. `trainable` — the module groups trained without LoRA (empty — all); the others
-    are frozen before the master is built. `images` — the image encoder of a vision-language model.
+    are frozen before the master is built. `media` — the media encoders of a model with images or speech.
     """
     if master_storage not in ("fp32", "split"):
         raise ValueError(f"master_storage must be 'fp32' or 'split', got {master_storage!r}")
@@ -370,7 +395,7 @@ def build_policy(
     if lora is not None and not quantized:
         lora_state = apply_lora(model, lora)
     # `sdpa` → `jolt_sdpa`: same formula, faster packing and decoding; the vision tower keeps its own attention
-    use_jolt_attention(model, skip=architecture.prefixes((VISION,)))
+    use_jolt_attention(model, skip=architecture.prefixes(MEDIA_GROUPS))
 
     split = with_master and master_storage == "split"
     offload = split and bool(master_offload)
@@ -432,7 +457,7 @@ def build_policy(
         master_low=master_low,
         master_offload=offload,
         lora=lora_state,
-        images=images,
+        media=media,
     )
 
 
@@ -469,10 +494,15 @@ def load_policy(cfg: JoltConfig, *, with_master: bool = True) -> Policy:
         attn_implementation=cfg.model.attn_implementation,
         trust_remote_code=cfg.model.trust_remote_code,
     )
-    images = load_image_encoder(
-        model_path, min_tokens=cfg.model.image_min_tokens, max_tokens=cfg.model.image_max_tokens
+    media = load_media_encoder(
+        model_path,
+        image_min_tokens=cfg.model.image_min_tokens,
+        image_max_tokens=cfg.model.image_max_tokens,
+        audio_max_seconds=cfg.model.audio_max_seconds,
     )
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if media is not None and media.codec is not None:
+        media.codec.to(device)  # speech targets are encoded once (cached) when the corpus is tokenized
     policy = build_policy(
         model,
         tokenizer,
@@ -484,14 +514,14 @@ def load_policy(cfg: JoltConfig, *, with_master: bool = True) -> Policy:
         master_offload=_offload_available(cfg, device),
         lora=cfg.lora if with_master and cfg.lora.enabled else None,
         trainable=cfg.model.trainable if with_master else (),
-        images=images,
+        media=media,
     )
     policy.set_gradient_checkpointing(cfg.model.gradient_checkpointing, selective=cfg.model.selective_checkpointing)
     if cfg.model.compile_kernels:
         from torch.utils._triton import has_triton
 
         if device.type == "cuda" and has_triton():
-            skip = architecture_of(policy.model).prefixes((VISION, PROJECTOR))
+            skip = architecture_of(policy.model).prefixes(MEDIA_GROUPS)
             policy.info["fused_kernels"] = fuse_model(policy.model, skip=skip)
         else:
             warnings.warn(

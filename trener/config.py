@@ -144,6 +144,8 @@ class ModelConfig:
     #: is resized so that its token count lies within `[image_min_tokens, image_max_tokens]`.
     image_min_tokens: int = 64
     image_max_tokens: int = 1024
+    #: Longest audio clip of a prompt of a model with speech input, seconds (12.5 audio tokens per second).
+    audio_max_seconds: float = 30.0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -157,6 +159,7 @@ class ModelConfig:
             "trainable": list(self.trainable),
             "image_min_tokens": self.image_min_tokens,
             "image_max_tokens": self.image_max_tokens,
+            "audio_max_seconds": self.audio_max_seconds,
         }
 
 
@@ -250,6 +253,9 @@ class OptimConfig:
     #: Learning rate multipliers of the vision tower and the projector of a vision-language model (`lr × scale`).
     vision_lr_scale: float = 1.0
     projector_lr_scale: float = 1.0
+    #: Learning rate multipliers of the speech encoder (`audio`) and of the speech output (`voice`, LFM3-Omni).
+    audio_lr_scale: float = 1.0
+    voice_lr_scale: float = 1.0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -268,6 +274,8 @@ class OptimConfig:
             "master_offload": self.master_offload,
             "vision_lr_scale": self.vision_lr_scale,
             "projector_lr_scale": self.projector_lr_scale,
+            "audio_lr_scale": self.audio_lr_scale,
+            "voice_lr_scale": self.voice_lr_scale,
         }
 
 
@@ -418,6 +426,11 @@ class SftConfig:
     rows_per_step: int = 8
     #: Periodic accuracy evaluation on `task.dataset` (as in JOLT) together with the NLL on the corpus `test` split.
     eval_tasks: bool = False
+    #: Weights of the text tokens and of the speech frames in the step loss (records `kind: speech`, docs/13-speech.md):
+    #: the loss is the weighted sum of `−log π` of the text tokens and the depth-decoder loss of the frames divided by
+    #: the weighted counts, as the checkpoint's `combined_loss`.
+    text_loss_weight: float = 1.0
+    speech_loss_weight: float = 1.0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -427,6 +440,8 @@ class SftConfig:
             "max_tokens": self.max_tokens,
             "rows_per_step": self.rows_per_step,
             "eval_tasks": self.eval_tasks,
+            "text_loss_weight": self.text_loss_weight,
+            "speech_loss_weight": self.speech_loss_weight,
         }
 
 
@@ -672,7 +687,9 @@ def validate_config(cfg: JoltConfig) -> JoltConfig:
             "model.image_min_tokens and model.image_max_tokens must satisfy 0 < min ≤ max, got "
             f"{cfg.model.image_min_tokens} and {cfg.model.image_max_tokens}"
         )
-    for key in ("vision_lr_scale", "projector_lr_scale"):
+    if not math.isfinite(cfg.model.audio_max_seconds) or cfg.model.audio_max_seconds <= 0:
+        raise ConfigError(f"model.audio_max_seconds must be > 0, got {cfg.model.audio_max_seconds}")
+    for key in ("vision_lr_scale", "projector_lr_scale", "audio_lr_scale", "voice_lr_scale"):
         value = getattr(cfg.optim, key)
         if not math.isfinite(value) or value <= 0:
             raise ConfigError(f"optim.{key} must be > 0, got {value} (freeze a group with model.trainable)")
@@ -868,6 +885,12 @@ def _validate_sft(sft: SftConfig) -> None:
         raise ConfigError(f"sft.replay_ratio must be in [0, 1), got {sft.replay_ratio}")
     if sft.replay_ratio > 0 and Path(sft.replay) == UNSET_PATH:
         raise ConfigError("sft.replay_ratio > 0 requires sft.replay — the replay corpus directory")
+    for key in ("text_loss_weight", "speech_loss_weight"):
+        value = getattr(sft, key)
+        if not math.isfinite(value) or value < 0:
+            raise ConfigError(f"sft.{key} must be ≥ 0, got {value}")
+    if sft.text_loss_weight == sft.speech_loss_weight == 0:
+        raise ConfigError("sft.text_loss_weight and sft.speech_loss_weight cannot both be 0")
 
 
 def _validate_abliteration(cfg: JoltConfig) -> None:

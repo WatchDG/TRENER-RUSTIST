@@ -15,6 +15,7 @@ alembic==1.20.1
 annotated-doc==0.0.5
 anyio==4.15.1
 attrs==26.1.0
+cffi==2.1.1
 click==8.5.0
 colorama==0.4.6
 colorlog==6.12.0
@@ -46,6 +47,7 @@ pillow==12.3.0
 propcache==0.5.4
 psutil==7.2.2
 pyarrow==26.0.0
+pycparser==3.12
 Pygments==2.21.0
 python-dateutil==3.0.0
 PyYAML==6.0.3
@@ -55,6 +57,8 @@ safetensors==0.8.0
 setuptools==78.1.0
 shellingham==1.5.4
 six==1.17.0
+# soundfile: reads and writes the audio clips and speech targets of LFM3-Omni (the wheel bundles libsndfile)
+soundfile==0.14.0
 SQLAlchemy==2.1.6
 sympy==1.14.0
 tokenizers==0.23.3

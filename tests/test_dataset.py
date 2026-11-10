@@ -338,7 +338,7 @@ def test_images_are_resolved_within_the_dataset(tmp_path: Path) -> None:
         ('["/abs/a.png"]', "relative path"),
         ('["C:/a.png"]', "relative path"),
         (r'["images\\a.png"]', "relative path"),
-        ('["images/a.txt"]', "not an image file"),
+        ('["images/a.txt"]', "not a supported file"),
         ('["images/missing.png"]', "not found"),
     ],
 )

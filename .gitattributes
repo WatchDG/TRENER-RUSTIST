@@ -18,4 +18,8 @@
 *.png binary
 *.jpg binary
 *.jpeg binary
+*.flac binary
+*.wav binary
+*.ogg binary
+*.mp3 binary
 *.safetensors binary

@@ -18,6 +18,16 @@ after `configuration_spark.py` and `modeling_spark.py` of
 (Apache-2.0, Copyright 2026 The XHToken team and the HuggingFace Inc. team);
 the Apache-2.0 text is in [LICENSE](LICENSE).
 
+`trener/audio.py` implements the windowed-sinc resampling of
+[torchaudio](https://github.com/pytorch/audio) (`torchaudio.functional.resample`, BSD-2-Clause, Copyright (c)
+2017 Facebook Inc. (Soumith Chintala)): the kernel construction follows its algorithm.
+
+Speech corpora built by `scripts/build_fleurs_speech_corpus.py` are not part of the repository; they are made from
+[FLEURS](https://huggingface.co/datasets/google/fleurs) (`google/fleurs`, revision
+70bb2e84b976b7e960aa89f1c648e09c59f894dd, CC-BY-4.0, Google) and keep its license. The spoken questions of
+`datasets/rust-voice/` are synthesized by LFM3-Omni-2B (LFM Open License v1.0) from the questions of
+`datasets/rust/rust-keywords-0001`.
+
 ## Sources
 
 | Source | Version | Used in | License | Copyright |

@@ -56,7 +56,7 @@ def main() -> int:
     policy = load_policy(cfg)
     handle = build_optimizer(cfg, policy)
     tasks = load_tasks(cfg.task.dataset, "train")[: cfg.rollout.batch_size]
-    pairs = [build_prompts(task, tokenizer=policy.tokenizer, images=policy.images) for task in tasks]
+    pairs = [build_prompts(task, tokenizer=policy.tokenizer, media=policy.media) for task in tasks]
     roll = generate_roles(policy, pairs, cfg.rollout, (STUDENT, TEACHER), seed=0)
     items = [(t.prompt_ids, t.completion_ids) for t in roll[STUDENT] + roll[TEACHER]]
     items.sort(key=lambda item: -(len(item[0]) + len(item[1])))

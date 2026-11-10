@@ -1,0 +1,28 @@
+{
+  "format": "jolt-tasks",
+  "format_version": 1,
+  "name": "rust-keywords-voice-0001",
+  "description": "rust-keywords-0001 questions spoken by LFM3-Omni's own speech synthesis (American English); the written question asks to answer the spoken one. Answers are key phrases (answer_type phrase).",
+  "source": "datasets/rust/rust-keywords-0001; scripts/make_rust_keywords_voice_0001.py",
+  "default_answer_type": "phrase",
+  "splits": {
+    "train": {
+      "file": "train.jsonl",
+      "records": 40,
+      "sha256": "48539aae9f39b406276d2387e04bafa04fef4886fe39436c1585b22efea629fa",
+      "audio": {
+        "files": 40,
+        "sha256": "874ef929702ce661ae0533464ac9657fe7637b9ed02555cee13fe980389288b4"
+      }
+    },
+    "test": {
+      "file": "test.jsonl",
+      "records": 20,
+      "sha256": "0f1bfa4ca20d938b8d400b40f610edc69efbab63bda740d65cc7b5c49c716cf9",
+      "audio": {
+        "files": 20,
+        "sha256": "8b864dc32fb231193221b877e68809e35af807c183debb6ce18358420ef608a5"
+      }
+    }
+  }
+}

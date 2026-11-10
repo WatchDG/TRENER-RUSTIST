@@ -4,7 +4,8 @@ LFM3-VL-2B ([LiquidAI/LFM3-VL-2B](https://huggingface.co/LiquidAI/LFM3-VL-2B), a
 `Lfm3VlForConditionalGeneration`) is the LFM3 language model with a vision tower and a projector in front of it. The
 pipeline trains it like any other model — `jolt`, `jolt+`, `opsd`, `grpo`, `sft`, with or without LoRA — and a task
 or a corpus record may carry images: the model sees them before the question, and the gradient of the step reaches
-the vision tower and the projector as well as the language model. The code is in `trener/vision.py` (images) and
+the vision tower and the projector as well as the language model. The code is in `trener/vision.py` (images),
+`trener/media.py` (media in prompts, shared with the speech of LFM3-Omni, [13-speech.md](13-speech.md)) and
 `trener/architectures/lfm3_vl.py` (the architecture).
 
 ## 1. The model
@@ -55,7 +56,7 @@ The chat template renders an image as `<|vision_start|><|image|><|vision_end|>`.
 resizes the image (bicubic, both sides multiples of 32) so that its token count lies within the budget and cuts it
 into 16×16 patches; the projector merges every 2×2 block of patches into one token, so **one token is 32×32 = 1024
 pixels**. The pipeline expands the single `<|image|>` into as many `<|image|>` tokens as the image yields
-(`trener.vision.expand_image_tokens`): the prompt's token ids have their final length, and `rollout.micro_batch_tokens`,
+(`trener.media.MediaEncoder.expand`): the prompt's token ids have their final length, and `rollout.micro_batch_tokens`,
 `sft.max_tokens`, the packing and `data validate --config` count image tokens as ordinary ones.
 
 | Field | Default | Meaning |

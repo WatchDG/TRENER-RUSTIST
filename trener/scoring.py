@@ -19,24 +19,32 @@ padding; `position_ids` restart from 0 for each sequence, so attention and the L
 convolution window do not cross document boundaries. The unpacked path (`max_tokens = 0`)
 remains the reference.
 
-Images (a vision-language model, `trener.vision`): a sequence may carry the images of its
-prompt. A row with images enters the language model as `inputs_embeds` — the token embeddings
-with the image features in place of the `<|image|>` tokens; each distinct image of the row
-goes through the vision tower once, with gradient when the vision tower or the projector is
-trained. Rows without images keep the `input_ids` path.
+Media (`trener.media`): a sequence may carry images, audio clips and speech frames. A row with
+media enters the language model as `inputs_embeds` — the token embeddings with the media in
+place of their placeholders; each distinct image or clip of the row is encoded once, with
+gradient when its encoder trains. Rows without media keep the `input_ids` path.
+
+Speech answers (LFM3-Omni, `trener.speech`): with `speech=SpeechLosses(...)` the same forward
+also scores the speech frames of the completions — the depth decoder predicts each frame from
+the hidden state at the position before it — and the loss of every frame is stored per sequence.
+
+A text answer of a model with speech never contains its mode switches and placeholders: with
+`text_mode=True` (rollouts) their logits are −inf, exactly as in the decoding that sampled them.
 """
 
 from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 import torch
 from torch.utils.checkpoint import checkpoint
 
 from .attention import DOCUMENTS_KWARG
-from .vision import Images, has_images, multimodal_embeds
+from .media import Media, has_media, media_embeds
+from .speech import frame_losses
 
 if TYPE_CHECKING:  # pragma: no cover - for type checking only
     from .config import RolloutConfig
@@ -87,6 +95,7 @@ def _chunk_logprobs(
     targets: torch.Tensor,
     lm_head: Any,
     use_checkpoint: bool,
+    bias: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """Log-probabilities of the target tokens for a chunk of positions."""
     if use_checkpoint:
@@ -95,24 +104,50 @@ def _chunk_logprobs(
             hidden,
             targets,
             lm_head,
+            bias,
             use_reentrant=False,
         )
-    return _chunk_logprobs_impl(hidden, targets, lm_head)
+    return _chunk_logprobs_impl(hidden, targets, lm_head, bias)
 
 
-def _chunk_logprobs_impl(hidden: torch.Tensor, targets: torch.Tensor, lm_head: Any) -> torch.Tensor:
+def _chunk_logprobs_impl(
+    hidden: torch.Tensor, targets: torch.Tensor, lm_head: Any, bias: torch.Tensor | None = None
+) -> torch.Tensor:
     # log_softmax(x)[y] = x[y] − logsumexp(x): the full log_softmax tensor is not needed
     logits = lm_head(hidden).float()
+    if bias is not None:
+        logits = logits + bias
     return logits.gather(-1, targets.unsqueeze(-1)).squeeze(-1) - torch.logsumexp(logits, dim=-1)
 
 
-def _flat_logprobs(hidden: torch.Tensor, targets: torch.Tensor, lm_head: Any, chunk: int, grad: bool) -> torch.Tensor:
+def _flat_logprobs(
+    hidden: torch.Tensor,
+    targets: torch.Tensor,
+    lm_head: Any,
+    chunk: int,
+    grad: bool,
+    bias: torch.Tensor | None = None,
+) -> torch.Tensor:
     """Log-probabilities of the targets over a flat list of positions (`lm_head` in chunks)."""
     pieces = [
-        _chunk_logprobs(hidden[offset : offset + chunk], targets[offset : offset + chunk], lm_head, use_checkpoint=grad)
+        _chunk_logprobs(
+            hidden[offset : offset + chunk], targets[offset : offset + chunk], lm_head, use_checkpoint=grad, bias=bias
+        )
         for offset in range(0, targets.shape[0], chunk)
     ]
     return torch.cat(pieces)
+
+
+@dataclass
+class SpeechLosses:
+    """Output of the speech-frame scoring of `score_sequences`: the loss of each supervised frame per sequence.
+
+    `values[i]` — `[frames]` losses of the speech frames of the completion of sequence `i` (`None` — no frames);
+    `generator` draws the masked codebooks (`trener.speech.frame_masks`).
+    """
+
+    values: list[torch.Tensor | None]
+    generator: torch.Generator | None = None
 
 
 def add_stat(stats: dict[str, Any] | None, key: str, value: int | float) -> None:
@@ -190,13 +225,48 @@ class StreamPacker:
         return rows
 
 
-def _model_inputs(policy: Policy, input_ids: torch.Tensor, images: Sequence[Images | None]) -> dict[str, Any]:
-    """Inputs of the base model: `input_ids`, or `inputs_embeds` with image features when the rows carry images."""
-    if not has_images(images):
+def _model_inputs(policy: Policy, input_ids: torch.Tensor, media: Sequence[Media | None]) -> dict[str, Any]:
+    """Inputs of the base model: `input_ids`, or `inputs_embeds` with the media when the rows carry any."""
+    if not has_media(media):
         return {"input_ids": input_ids}
-    if policy.images is None:
-        raise ValueError("the sequences carry images, but the model has no image encoder (a vision-language model)")
-    return {"inputs_embeds": multimodal_embeds(policy.model, policy.images, input_ids, images)}
+    if policy.media is None:
+        raise ValueError("the sequences carry media, but the model takes none (text-only model)")
+    return {"inputs_embeds": media_embeds(policy.model, policy.media, input_ids, media)}
+
+
+def _speech_frames(
+    policy: Policy, prompt: Sequence[int], completion: Sequence[int], media: Media | None
+) -> tuple[list[int], torch.Tensor] | None:
+    """Positions whose hidden state predicts each speech frame of the completion, and the frames' codes."""
+    if media is None or media.speech is None or policy.media is None:
+        return None
+    token = policy.media.audio_out_token_id
+    tokens = [*prompt, *completion]
+    positions = [position for position, value in enumerate(tokens) if value == token]
+    if len(positions) != media.frames:
+        raise ValueError(f"the sequence has {len(positions)} speech tokens, its media have {media.frames} frames")
+    kept = [index for index, position in enumerate(positions) if position >= len(prompt)]
+    return [positions[index] - 1 for index in kept], media.speech[kept]
+
+
+def _score_speech(
+    policy: Policy,
+    hidden: torch.Tensor,
+    latents: list[torch.Tensor],
+    codes: list[torch.Tensor],
+    owners: list[int],
+    speech: SpeechLosses,
+    grad: bool,
+) -> None:
+    """Frame losses of the gathered frames, stored per sequence (`owners[k]` — the sequence of frame group `k`)."""
+    if not latents:
+        return
+    eos = int(policy.model.config.audio_eos_code)
+    values = frame_losses(
+        policy.model, torch.cat(latents), torch.cat(codes).to(hidden.device), eos, generator=speech.generator
+    )
+    for owner, value in zip(owners, values.split([code.shape[0] for code in codes]), strict=True):
+        speech.values[owner] = value if grad else value.detach()
 
 
 def _kept_positions(completion: Sequence[int], mask: Sequence[bool] | None) -> list[int]:
@@ -216,7 +286,9 @@ def score_sequences(
     groups: Sequence[Any] | None = None,
     stats: dict[str, Any] | None = None,
     masks: Sequence[Sequence[bool] | None] | None = None,
-    images: Sequence[Images | None] | None = None,
+    media: Sequence[Media | None] | None = None,
+    text_mode: bool = False,
+    speech: SpeechLosses | None = None,
 ) -> list[torch.Tensor]:
     """Computes the log-probabilities of completion tokens for a set of (prompt, completion) pairs.
 
@@ -237,7 +309,10 @@ def score_sequences(
     `stats` (optional) accumulates `real_tokens` — the tokens of the sequences — and
     `batch_tokens` — the tokens that went through the model (with padding).
 
-    `images` (optional) is one entry per sequence: the images of its prompt (`None` — none).
+    `media` (optional) is one entry per sequence: its images, clips and speech frames (`None` — none).
+    `text_mode` — the completions are text answers of the decoding (`Policy.text_bias`): the tokens the
+    decoding never samples get −inf. `speech` (optional) receives the losses of the speech frames of the
+    completions (`SpeechLosses`).
     """
     if not items:
         return []
@@ -249,14 +324,17 @@ def score_sequences(
         for (_, completion), mask in zip(items, masks, strict=True):
             if mask is not None and len(mask) != len(completion):
                 raise ValueError(f"mask length ({len(mask)}) does not match completion length ({len(completion)})")
-    if images is not None and len(images) != len(items):
-        raise ValueError(f"number of image entries ({len(images)}) must match the number of sequences ({len(items)})")
-    pictures: Sequence[Images | None] = images if images is not None else [None] * len(items)
+    if media is not None and len(media) != len(items):
+        raise ValueError(f"number of media entries ({len(media)}) must match the number of sequences ({len(items)})")
+    if speech is not None and len(speech.values) != len(items):
+        raise ValueError(f"speech losses have {len(speech.values)} slots for {len(items)} sequences")
+    entries: Sequence[Media | None] = media if media is not None else [None] * len(items)
+    lm_head = policy.model.lm_head
+    bias = policy.text_bias(int(lm_head.weight.shape[0])) if text_mode else None
     if max_tokens > 0:
-        return _score_packed(policy, items, grad, int(max_tokens), groups, stats, masks, pictures)
+        return _score_packed(policy, items, grad, int(max_tokens), groups, stats, masks, entries, bias, speech)
 
     device = policy.device
-    lm_head = policy.model.lm_head
     base = _base_model(policy)
     chunk = max(1, int(LOGIT_CHUNK))
 
@@ -283,6 +361,7 @@ def score_sequences(
         rows: list[int] = []
         columns: list[int] = []
         target_ids: list[int] = []
+        frames: list[tuple[int, int, list[int], torch.Tensor]] = []
         for row, (prompt, completion) in enumerate(batch):
             tokens = list(prompt) + list(completion)
             input_ids[row, : len(tokens)] = torch.tensor(tokens, dtype=torch.long)
@@ -291,6 +370,9 @@ def score_sequences(
             rows.extend([row] * len(kept[row]))
             columns.extend(len(prompt) - 1 + position for position in kept[row])
             target_ids.extend(int(completion[position]) for position in kept[row])
+            found = _speech_frames(policy, prompt, completion, entries[indices[row]]) if speech is not None else None
+            if found is not None:
+                frames.append((indices[row], row, found[0], found[1]))
         input_ids = input_ids.to(device)
         attention_mask = attention_mask.to(device)
 
@@ -299,16 +381,26 @@ def score_sequences(
         # fp32 logits over the whole vocabulary.
         context = torch.enable_grad() if grad else torch.no_grad()
         with context:
-            inputs = _model_inputs(policy, input_ids, [pictures[index] for index in indices])
+            inputs = _model_inputs(policy, input_ids, [entries[index] for index in indices])
             outputs = base(**inputs, attention_mask=attention_mask, use_cache=False)
             hidden_states = outputs.last_hidden_state
+            if speech is not None and frames:
+                _score_speech(
+                    policy,
+                    hidden_states,
+                    [hidden_states[row, positions] for _, row, positions, _ in frames],
+                    [codes for _, _, _, codes in frames],
+                    [owner for owner, _, _, _ in frames],
+                    speech,
+                    grad,
+                )
             if target_ids:
                 row_index = torch.tensor(rows, dtype=torch.long, device=device)
                 column_index = torch.tensor(columns, dtype=torch.long, device=device)
                 targets = torch.tensor(target_ids, dtype=torch.long, device=device)
                 # completion positions of the whole micro-batch as one flat tensor
                 hidden = hidden_states[row_index, column_index]
-                flat = _flat_logprobs(hidden, targets, lm_head, chunk, grad)
+                flat = _flat_logprobs(hidden, targets, lm_head, chunk, grad, bias)
                 values = list((flat if grad else flat.detach()).split(completion_lengths))
             else:
                 values = [torch.zeros(0, dtype=torch.float32, device=device) for _ in batch]
@@ -325,7 +417,9 @@ def _score_packed(
     groups: Sequence[Any] | None,
     stats: dict[str, Any] | None,
     masks: Sequence[Sequence[bool] | None] | None = None,
-    images: Sequence[Images | None] | None = None,
+    media: Sequence[Media | None] | None = None,
+    bias: torch.Tensor | None = None,
+    speech: SpeechLosses | None = None,
 ) -> list[torch.Tensor]:
     """Packed scoring: one forward pass over one row of sequences from a single group."""
     device = policy.device
@@ -347,9 +441,13 @@ def _score_packed(
         columns: list[int] = []
         target_ids: list[int] = []
         completion_lengths: list[int] = []
+        frames: list[tuple[int, list[int], torch.Tensor]] = []
         for index in members:
             prompt, completion = items[index]
             offset = len(token_ids)
+            found = _speech_frames(policy, prompt, completion, media[index] if media else None) if speech else None
+            if found is not None:
+                frames.append((index, [offset + position for position in found[0]], found[1]))
             token_ids.extend(int(token) for token in prompt)
             token_ids.extend(int(token) for token in completion)
             position_ids.extend(range(len(prompt) + len(completion)))
@@ -368,14 +466,24 @@ def _score_packed(
         with context:
             # no `attention_mask`: restarting `position_ids` isolates the documents of the row;
             # document lengths are for per-document attention (`trener.attention`)
-            row_images = [images[index] for index in members] if images is not None else []
-            inputs = _model_inputs(policy, input_ids, row_images)
+            row_media = [media[index] for index in members] if media is not None else []
+            inputs = _model_inputs(policy, input_ids, row_media)
             outputs = base(**inputs, position_ids=positions, use_cache=False, **{DOCUMENTS_KWARG: documents})
             hidden_states = outputs.last_hidden_state[0]
+            if speech is not None and frames:
+                _score_speech(
+                    policy,
+                    hidden_states,
+                    [hidden_states[positions] for _, positions, _ in frames],
+                    [codes for _, _, codes in frames],
+                    [owner for owner, _, _ in frames],
+                    speech,
+                    grad,
+                )
             if target_ids:
                 column_index = torch.tensor(columns, dtype=torch.long, device=device)
                 targets = torch.tensor(target_ids, dtype=torch.long, device=device)
-                flat = _flat_logprobs(hidden_states[column_index], targets, lm_head, chunk, grad)
+                flat = _flat_logprobs(hidden_states[column_index], targets, lm_head, chunk, grad, bias)
                 values = list((flat if grad else flat.detach()).split(completion_lengths))
             else:
                 values = [torch.zeros(0, dtype=torch.float32, device=device) for _ in members]
@@ -413,7 +521,7 @@ def score_role_pair(
     cfg: RolloutConfig | None = None,
     grad: bool = False,
 ) -> list[torch.Tensor]:
-    """Scores the tokens of one role in a foreign context (with the trajectories' images).
+    """Scores the tokens of one role in a foreign context (with the trajectories' media, as text answers).
 
     `other_prompt_ids` holds one prompt per trajectory, in the same order as
     `trajectories` (the context in which the role's tokens are scored).
@@ -427,8 +535,8 @@ def score_role_pair(
         (list(other_prompt_ids[index]), list(trajectory.completion_ids))
         for index, trajectory in enumerate(trajectories)
     ]
-    images = [trajectory.images for trajectory in trajectories]
-    return score_sequences(policy, items, micro_batch_size=micro, grad=grad, images=images)
+    media = [trajectory.media for trajectory in trajectories]
+    return score_sequences(policy, items, micro_batch_size=micro, grad=grad, media=media, text_mode=True)
 
 
 def deltas(
@@ -458,6 +566,7 @@ __all__ = [
     "PASS_TEACHER_FOREIGN",
     "PASS_TEACHER_OWN",
     "REQUIRED_PASSES",
+    "SpeechLosses",
     "StreamPacker",
     "add_stat",
     "deltas",

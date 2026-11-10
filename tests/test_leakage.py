@@ -70,9 +70,9 @@ def test_evaluation_uses_student_prompt_only(
     seen: list[Any] = []
     original = evaluate_module.build_prompts
 
-    def spy(task: Any, privileged: Any = None, tokenizer: Any = None, images: Any = None) -> Any:
+    def spy(task: Any, privileged: Any = None, tokenizer: Any = None, media: Any = None) -> Any:
         seen.append(privileged)
-        return original(task, privileged=privileged, tokenizer=tokenizer, images=images)
+        return original(task, privileged=privileged, tokenizer=tokenizer, media=media)
 
     monkeypatch.setattr(evaluate_module, "build_prompts", spy)
     evaluate(tiny_policy, [_task_with_marker()], tiny_config.eval, seed=0, rollout=tiny_config.rollout)

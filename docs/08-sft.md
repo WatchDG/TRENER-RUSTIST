@@ -64,7 +64,8 @@ fields depends on `kind`:
 |---|---|---|
 | `text` | `text`, optional `title` | the whole text |
 | `completion` | `prompt`, `completion` — strings as is | only `completion` |
-| `qa` | `question`, `answer`, optional `system`, `thinking`, `images` — via the model's chat template | only the model's turn |
+| `qa` | `question`, `answer`, optional `system`, `thinking`, `images`, `audio` — via the model's chat template | only the model's turn |
+| `speech` | `text`, `speech` (a recording), optional `system` — a speech answer of LFM3-Omni | the speech frames (depth decoder) and the turn's marks |
 
 - `completion` without a chat template is used for question–answer pairs of the form
   `Question: …\nAnswer: …` and for the replay corpus, whose prompt already contains the
@@ -83,6 +84,11 @@ fields depends on `kind`:
   corpus directory, shown before the question ([12-vision.md](12-vision.md)). Their tokens count in `sft.max_tokens`,
   and the file stamp in `corpus.json` covers the images (`images: {files, sha256}`). Example — the corpus of
   `datasets/rust-vision/rust-code-output-0001`, preset `configs/smoke_sft_lfm3_vl.yaml`.
+- `qa` of a model with speech input (LFM3-Omni) may carry `audio` clips (then `question` may be empty: speech
+  recognition), and a `speech` record teaches a speech answer: the model says the recording `speech` in reply to
+  `text`. The step loss pools text tokens and speech frames (`sft.text_loss_weight`, `sft.speech_loss_weight`), the
+  evaluation adds the speech loss and the speech synthesis and recognition error rates ([13-speech.md](13-speech.md)).
+  Example — `scripts/build_fleurs_speech_corpus.py`, preset `configs/sft_lfm3_omni_fleurs_ru.yaml`.
 
 Corpus validation — `python -m trener data validate-corpus <directory>`: record fields,
 uniqueness of `id`, and `records` and `sha256` against the manifest. The

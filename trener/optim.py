@@ -29,7 +29,7 @@ from typing import TYPE_CHECKING, Any
 import torch
 
 from .adafactor import FunctionalAdafactor
-from .architectures import PROJECTOR, VISION, architecture_of
+from .architectures import AUDIO, PROJECTOR, VISION, VOICE, architecture_of
 from .master import merge_master_, split_master_
 
 if TYPE_CHECKING:  # pragma: no cover - for typing only
@@ -273,9 +273,14 @@ class OptimizerHandle:
 
 def lr_scales(cfg: JoltConfig, policy: Policy) -> list[float]:
     """Learning rate multiplier of each master parameter by its module group (`optim.vision_lr_scale`,
-    `optim.projector_lr_scale`; the language model — 1)."""
+    `optim.projector_lr_scale`, `optim.audio_lr_scale`, `optim.voice_lr_scale`; the language model — 1)."""
     architecture = architecture_of(policy.model)
-    by_group = {VISION: float(cfg.optim.vision_lr_scale), PROJECTOR: float(cfg.optim.projector_lr_scale)}
+    by_group = {
+        VISION: float(cfg.optim.vision_lr_scale),
+        PROJECTOR: float(cfg.optim.projector_lr_scale),
+        AUDIO: float(cfg.optim.audio_lr_scale),
+        VOICE: float(cfg.optim.voice_lr_scale),
+    }
     return [by_group.get(architecture.group_of(name), 1.0) for name in policy.master_names]
 
 

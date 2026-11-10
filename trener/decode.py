@@ -23,9 +23,10 @@ assembly of masks). Here:
   and trains on the finished trajectories (`rollout.overlap`).
 
 Models with full attention (Llama-like) and hybrids in the LFM3 style
-(`layer_types`: `conv` / `full_attention` / `sliding_attention`) are supported, and so is LFM3-VL:
-a prompt with images is prefilled from `inputs_embeds` with the image features (`trener.vision`),
-the decode steps are text tokens as for any model. For sliding
+(`layer_types`: `conv` / `full_attention` / `sliding_attention`) are supported, and so are LFM3-VL
+and LFM3-Omni: a prompt with media is prefilled from `inputs_embeds` (`trener.media`), the decode
+steps are text tokens as for any model. A model with speech never samples its mode switches and
+placeholders in a text answer (`Policy.text_bias`, a static bias added to the logits). For sliding
 layers the ring buffer must be filled by the start of decoding, so the prompt is left-padded
 to a length not shorter than the window. `repetition_penalty ≠ 1` is not supported
 (config validation).
@@ -47,7 +48,7 @@ import torch
 from transformers import StaticCache
 from transformers.cache_utils import StaticSlidingWindowLayer
 
-from .vision import Images, has_images, multimodal_embeds
+from .media import Media, has_media, media_embeds
 
 if TYPE_CHECKING:  # pragma: no cover - for type checking only
     from .config import RolloutConfig
@@ -178,6 +179,8 @@ class _Runner:
     origin: torch.Tensor  # [] — position from which the ring is filled after prefill (`prompt_width − W`)
     slot: torch.Tensor  # [1] — ring slot written by the current step: `(cur − origin) mod W`
     noise: torch.Tensor | None  # [B, V] — Gumbel noise of the step (None for greedy decoding)
+    bias: torch.Tensor | None = None  # [V] — −inf at the tokens a text answer never contains (`Policy.text_bias`)
+    stops: torch.Tensor | None = None  # [K] — further tokens that end a text answer besides EOS (`Policy.stop_ids`)
     graph: Any = None
     graph_failed: bool = False
 
@@ -252,17 +255,17 @@ class StaticDecoder:
         max_new_tokens: int,
         do_sample: bool,
         seed: int | None = None,
-        images: Sequence[Images | None] | None = None,
+        media: Sequence[Media | None] | None = None,
     ) -> DecodeResult:
         """Generates up to `max_new_tokens` tokens for each prompt.
 
         Rows after EOS are padded; the result is not trimmed at EOS
-        (`rollout._trim_completion` does that, as for `generate`). `images` — the images of each prompt.
+        (`rollout._trim_completion` does that, as for `generate`). `media` — the media of each prompt.
         """
         if not prompt_ids:
             return DecodeResult(completions=[], decode_steps=0)
         with self._inference_mode():
-            runner, generator, stats = self._prepare(prompt_ids, max_new_tokens, do_sample, seed, images)
+            runner, generator, stats = self._prepare(prompt_ids, max_new_tokens, do_sample, seed, media)
             width, used_graph = self._decode_loop(runner, do_sample, generator, max_new_tokens)
 
         completions = runner.out[:, :width].tolist()
@@ -276,7 +279,7 @@ class StaticDecoder:
         max_new_tokens: int,
         do_sample: bool,
         seed: int | None = None,
-        images: Sequence[Images | None] | None = None,
+        media: Sequence[Media | None] | None = None,
     ) -> DecodeSession:
         """Starts generation whose rows arrive as they finish (`DecodeSession`).
 
@@ -286,7 +289,7 @@ class StaticDecoder:
         if not prompt_ids:
             raise ValueError("no prompts to generate from")
         with self._inference_mode():
-            runner, generator, stats = self._prepare(prompt_ids, max_new_tokens, do_sample, seed, images)
+            runner, generator, stats = self._prepare(prompt_ids, max_new_tokens, do_sample, seed, media)
             graph = None
             if max_new_tokens > 1 and not bool(runner.finished.all()):
                 graph = self._graph_for(runner, do_sample, generator, max_new_tokens)
@@ -322,7 +325,7 @@ class StaticDecoder:
         max_new_tokens: int,
         do_sample: bool,
         seed: int | None,
-        images: Sequence[Images | None] | None = None,
+        media: Sequence[Media | None] | None = None,
     ) -> tuple[_Runner, torch.Generator, dict[str, Any]]:
         """Call cache, noise generator and prefill (the model is in inference mode in the calling code)."""
         if max_new_tokens < 1:
@@ -346,9 +349,9 @@ class StaticDecoder:
         generator = torch.Generator(device=device)
         generator.manual_seed(int(seed) if seed is not None else int(torch.randint(0, 2**62, (1,)).item()))
 
-        if images is not None and len(images) != batch:
-            raise ValueError(f"number of image entries ({len(images)}) must match the number of prompts ({batch})")
-        self._prefill(runner, input_ids.to(device), mask.to(device), do_sample, generator, eos, pad, images)
+        if media is not None and len(media) != batch:
+            raise ValueError(f"number of media entries ({len(media)}) must match the number of prompts ({batch})")
+        self._prefill(runner, input_ids.to(device), mask.to(device), do_sample, generator, eos, pad, media)
         return runner, generator, {"rows": batch, "prompt_width": prompt_width, "cache_len": cache_len}
 
     def _runner(self, batch: int, cache_len: int, max_new: int, do_sample: bool, eos: Any, pad: Any) -> _Runner:
@@ -377,6 +380,8 @@ class StaticDecoder:
             origin=torch.zeros((), dtype=torch.long, device=device),
             slot=slot,
             noise=torch.zeros((batch, vocab), dtype=torch.float32, device=device) if do_sample else None,
+            bias=text_bias(vocab) if (text_bias := getattr(self.policy, "text_bias", None)) is not None else None,
+            stops=self._stops(eos, device),
         )
         self._runners[key] = runner
         return runner
@@ -414,21 +419,21 @@ class StaticDecoder:
         generator: torch.Generator,
         eos: Any,
         pad: Any,
-        images: Sequence[Images | None] | None = None,
+        media: Sequence[Media | None] | None = None,
     ) -> None:
         """Prefill in one forward pass and choice of the first token; prepares the decode-step buffers.
 
-        Prompts with images are prefilled from `inputs_embeds` with the image features (row by row).
+        Prompts with media are prefilled from `inputs_embeds` with the media in place of their placeholders.
         """
         batch, prompt_width = input_ids.shape
         runner.cache.reset()
         real = mask.sum(dim=-1)
         positions = (mask.cumsum(dim=-1) - 1).masked_fill(mask == 0, 1)
         inputs: dict[str, torch.Tensor] = {"input_ids": input_ids}
-        if images is not None and has_images(images):
-            if self.policy.images is None:
-                raise ValueError("the prompts carry images, but the model has no image encoder")
-            inputs = {"inputs_embeds": multimodal_embeds(self.policy.model, self.policy.images, input_ids, images)}
+        if media is not None and has_media(media):
+            if self.policy.media is None:
+                raise ValueError("the prompts carry media, but the model takes none")
+            inputs = {"inputs_embeds": media_embeds(self.policy.model, self.policy.media, input_ids, media)}
         outputs = self.policy.model(
             **inputs,
             attention_mask=mask,
@@ -438,6 +443,8 @@ class StaticDecoder:
             logits_to_keep=1,
         )
         logits = outputs.logits[:, -1, :]
+        if runner.bias is not None:
+            logits = logits.float() + runner.bias
         noise = None
         if do_sample:
             assert runner.noise is not None
@@ -453,12 +460,25 @@ class StaticDecoder:
         runner.cur.fill_(prompt_width)
         runner.origin.fill_(prompt_width - self._window)
         runner.step.fill_(1)
-        runner.finished.copy_(first == int(eos) if eos is not None else torch.zeros_like(runner.finished))
+        runner.finished.copy_(self._ends(first, eos, runner) if eos is not None else torch.zeros_like(runner.finished))
         runner.prompt_mask.zero_()
         runner.prompt_mask[:, :prompt_width] = mask.bool()
         runner.prompt_mask[:, prompt_width:] = True
 
     # ---------------------------------------------------------- decode step
+
+    def _stops(self, eos: Any, device: torch.device) -> torch.Tensor | None:
+        """Tokens that end a text answer besides EOS (`Policy.stop_ids`; `None` — EOS only)."""
+        extra = [int(token) for token in getattr(self.policy, "stop_ids", ()) if token != eos]
+        return torch.tensor(extra, dtype=torch.long, device=device) if extra else None
+
+    @staticmethod
+    def _ends(tokens: torch.Tensor, eos: Any, runner: _Runner) -> torch.Tensor:
+        """Rows whose token ends the answer: EOS or another stop token of the model."""
+        ended = tokens == int(eos)
+        if runner.stops is not None:
+            ended = ended | torch.isin(tokens, runner.stops)
+        return ended
 
     def _decode_step(self, runner: _Runner, do_sample: bool, eos: Any, pad: Any) -> None:
         """One decode step: forward → token → write into `out`. Suitable for capture in a graph."""
@@ -473,6 +493,8 @@ class StaticDecoder:
             logits_to_keep=1,
         )
         logits = outputs.logits[:, -1, :]
+        if runner.bias is not None:
+            logits = logits.float() + runner.bias
         chosen = sample_tokens(
             logits,
             self.temperature,
@@ -484,7 +506,7 @@ class StaticDecoder:
         chosen = torch.where(runner.finished, torch.full_like(chosen, int(pad)), chosen)
         runner.out.index_copy_(1, runner.step, chosen[:, None])
         if eos is not None:
-            runner.finished |= chosen == int(eos)
+            runner.finished |= self._ends(chosen, eos, runner)
         runner.token.copy_(chosen[:, None])
         runner.position.add_(1)
         runner.cur.add_(1)

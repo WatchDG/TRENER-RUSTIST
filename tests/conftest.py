@@ -19,6 +19,9 @@ MINICPM_PATH = Path(__file__).resolve().parents[1] / "models" / "MiniCPM5-2B"
 #: Directory of the local LFM3-VL-2B checkpoint (may be absent in CI).
 VL_PATH = Path(__file__).resolve().parents[1] / "models" / "LFM3-VL-2B"
 
+#: Directory of the local LFM3-Omni-2B checkpoint (may be absent in CI).
+OMNI_PATH = Path(__file__).resolve().parents[1] / "models" / "LFM3-Omni-2B"
+
 
 @pytest.fixture(scope="session")
 def project_root() -> Path:
@@ -296,11 +299,11 @@ def vl_tokenizer() -> Any:
 def vl_encoder() -> Any:
     """Image encoder of the LFM3-VL checkpoint with a small budget: 4–16 tokens per image."""
     pytest.importorskip("torchvision")
-    from trener.vision import load_image_encoder
+    from trener.media import load_media_encoder
 
     if not (VL_PATH / "processor_config.json").is_file():
         pytest.skip(f"LFM3-VL processor is unavailable: {VL_PATH}")
-    return load_image_encoder(VL_PATH, min_tokens=4, max_tokens=16)
+    return load_media_encoder(VL_PATH, image_min_tokens=4, image_max_tokens=16, audio_max_seconds=30.0)
 
 
 @pytest.fixture(scope="session")
@@ -327,7 +330,7 @@ def tiny_vl_policy(vl_tokenizer: Any, vl_encoder: Any) -> Any:
 
     model = make_tiny_vl_model()
     return build_policy(
-        model, vl_tokenizer, device=torch.device("cpu"), dtype="float32", with_master=False, images=vl_encoder
+        model, vl_tokenizer, device=torch.device("cpu"), dtype="float32", with_master=False, media=vl_encoder
     )
 
 
@@ -335,3 +338,125 @@ def tiny_vl_policy(vl_tokenizer: Any, vl_encoder: Any) -> Any:
 def vl_model_factory() -> Any:
     """`make_tiny_vl_model`: a fresh small LFM3-VL model per call (tests that change weights or freeze groups)."""
     return make_tiny_vl_model
+
+
+# --------------------------------------------------------------- LFM3-Omni
+
+
+def make_tiny_omni_model(seed: int = 0) -> Any:
+    """Small random model of the LFM3-Omni architecture: the checkpoint's configuration scaled down.
+
+    The language model has the LFM3 layer kinds, the vision tower a convolution and an attention layer, the speech
+    encoder two LFM2 layers, the depth decoder one attention layer; the vocabulary, the placeholders and the 12
+    codebooks of 2017 codes are those of the checkpoint.
+    """
+    import torch
+    from transformers import AutoConfig, AutoModelForImageTextToText
+
+    try:
+        config = AutoConfig.from_pretrained(str(OMNI_PATH), trust_remote_code=True)
+    except Exception as exc:  # pragma: no cover - model directory is missing
+        pytest.skip(f"LFM3-Omni configuration is unavailable: {exc}")
+    text = config.text_config
+    text.hidden_size = 64
+    text.intermediate_size = 128
+    text.num_attention_heads = 4
+    text.num_key_value_heads = 2
+    text.head_dim = 16
+    text.layer_types = ["conv", "conv", "full_attention", "conv", "sliding_attention", "conv"]
+    text.num_hidden_layers = 6
+    text.sliding_window = 32
+    vision = config.vision_config
+    vision.hidden_size = 32
+    vision.intermediate_size = 64
+    vision.num_attention_heads = 4
+    vision.num_key_value_heads = 2
+    vision.layer_types = ["conv", "full_attention"]
+    vision.num_hidden_layers = 2
+    config.projector_hidden_size = 64
+    encoder = config.audio_encoder_config
+    encoder.hidden_size = 32
+    encoder.conv_channels = 8
+    lfm = encoder.text_config
+    lfm.hidden_size = 32
+    lfm.intermediate_size = 64
+    lfm.block_auto_adjust_ff_dim = False
+    lfm.num_attention_heads = 4
+    lfm.num_key_value_heads = 2
+    lfm.layer_types = ["conv", "full_attention"]
+    lfm.num_hidden_layers = 2
+    depth = config.depth_config
+    depth.hidden_size = 32
+    depth.intermediate_size = 64
+    depth.num_attention_heads = 4
+    depth.num_key_value_heads = 2
+    depth.head_dim = 8
+    depth.layer_types = ["full_attention"]
+    depth.num_hidden_layers = 1
+    torch.manual_seed(seed)
+    return AutoModelForImageTextToText.from_config(config, trust_remote_code=True, dtype=torch.float32)
+
+
+@pytest.fixture(scope="session")
+def omni_tokenizer() -> Any:
+    """LFM3-Omni tokenizer as the pipeline loads it."""
+    from trener.chat_format import load_tokenizer
+
+    if not (OMNI_PATH / "tokenizer_config.json").is_file():
+        pytest.skip(f"LFM3-Omni tokenizer is unavailable: {OMNI_PATH}")
+    return load_tokenizer(OMNI_PATH)
+
+
+@pytest.fixture(scope="session")
+def omni_media(tmp_path_factory: pytest.TempPathFactory) -> Any:
+    """Media encoders of the LFM3-Omni checkpoint (images 4–16 tokens, clips ≤ 30 s, codec on the CPU)."""
+    pytest.importorskip("soundfile")
+    from trener.media import load_media_encoder
+
+    if not (OMNI_PATH / "processor_config.json").is_file():
+        pytest.skip(f"LFM3-Omni processor is unavailable: {OMNI_PATH}")
+    media = load_media_encoder(OMNI_PATH, image_min_tokens=4, image_max_tokens=16, audio_max_seconds=30.0)
+    assert media is not None and media.codec is not None
+    media.codec.cache_dir = tmp_path_factory.mktemp("speech_codes")
+    return media
+
+
+@pytest.fixture(scope="session")
+def omni_clips(tmp_path_factory: pytest.TempPathFactory) -> list[Path]:
+    """Three synthetic clips: 1 s at 16 kHz, 0.6 s stereo at 44.1 kHz, 1.5 s at 24 kHz (tone glides and noise)."""
+    import numpy as np
+    import soundfile
+
+    directory = tmp_path_factory.mktemp("omni_clips")
+    rng = np.random.default_rng(0)
+    paths = []
+    for index, (rate, seconds, channels) in enumerate([(16_000, 1.0, 1), (44_100, 0.6, 2), (24_000, 1.5, 1)]):
+        t = np.arange(int(rate * seconds)) / rate
+        wave = 0.3 * np.sin(2 * np.pi * (200 + 150 * index) * t * (1 + t)) + 0.02 * rng.standard_normal(t.shape)
+        samples = np.stack([wave, wave[::-1]], axis=1) if channels == 2 else wave
+        path = directory / f"clip-{index}.wav"
+        soundfile.write(str(path), samples.astype(np.float32), rate)
+        paths.append(path)
+    return paths
+
+
+@pytest.fixture(scope="session")
+def tiny_omni_policy(omni_tokenizer: Any, omni_media: Any) -> Any:
+    """Small random LFM3-Omni model without master weights (decoding and scoring)."""
+    import torch
+    from trener.modeling import build_policy
+
+    return build_policy(
+        make_tiny_omni_model(),
+        omni_tokenizer,
+        device=torch.device("cpu"),
+        dtype="float32",
+        with_master=False,
+        media=omni_media,
+    )
+
+
+@pytest.fixture(scope="session")
+def omni_model_factory() -> Any:
+    """`make_tiny_omni_model`: a fresh small LFM3-Omni model per call."""
+    return make_tiny_omni_model

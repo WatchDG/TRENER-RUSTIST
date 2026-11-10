@@ -28,9 +28,9 @@ import torch
 from .config import UNSET_PATH, JoltConfig
 from .corpus import Document, SftPlan, corpus_fingerprint, load_corpora, load_corpus, tokenize_records
 from .losses import policy_gradient_loss
-from .scoring import score_sequences
+from .media import MediaEncoder
+from .scoring import SpeechLosses, score_sequences
 from .trainer import Trainer, _peak_memory_gb, _peak_reserved_gb, _ratio, _synchronize
-from .vision import ImageEncoder
 
 if TYPE_CHECKING:  # pragma: no cover - for typing only
     from .cli import TrainResult
@@ -55,12 +55,17 @@ class SftMetrics:
     update_tok_s: float
     peak_memory_gb: float = 0.0
     reserved_memory_gb: float = 0.0
+    #: Speech answers (`kind: speech`): frames of the step and their mean depth-decoder loss.
+    speech_frames: int = 0
+    speech_loss: float = 0.0
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "step": self.step,
             "loss": self.loss,
             "loss_tokens": self.loss_tokens,
+            "speech_frames": self.speech_frames,
+            "speech_loss": self.speech_loss,
             "processed_tokens": self.processed_tokens,
             "rows": self.rows,
             "documents": self.documents,
@@ -82,27 +87,39 @@ class SftTrainer(Trainer):
         if torch.cuda.is_available():
             torch.cuda.reset_peak_memory_stats()
         n_tokens = sum(doc.loss_tokens for row in rows for doc in row)
-        if n_tokens <= 0:
+        n_frames = sum(doc.speech_frames for row in rows for doc in row)
+        text_weight, speech_weight = float(self.cfg.sft.text_loss_weight), float(self.cfg.sft.speech_loss_weight)
+        # the step loss pools text tokens and speech frames by count and weight (the checkpoint's `combined_loss`)
+        denominator = text_weight * n_tokens + speech_weight * n_frames
+        if denominator <= 0:
             raise RuntimeError("sft step without loss tokens")
         max_tokens = int(self.cfg.sft.max_tokens)
         processed = 0
+        generator = _speech_generator(self.policy, int(self.cfg.run.seed), self.step_index) if n_frames else None
 
         self.optimizer.zero_grad()
         self.policy.set_use_cache(False)
         self.policy.train()
         loss_value = 0.0
+        speech_sum = 0.0
         for row in rows:
             items = [doc.item_pair() for doc in row]
+            speech = SpeechLosses([None] * len(row), generator) if any(doc.speech_frames for doc in row) else None
             values = score_sequences(
                 self.policy,
                 items,
                 micro_batch_size=len(items),
                 grad=True,
                 max_tokens=max_tokens,
-                **_image_kwargs(row),
+                speech=speech,
+                **_document_kwargs(row),
             )
             logps = torch.cat([value.reshape(-1) for value in values])
-            loss = policy_gradient_loss(logps, torch.ones_like(logps), n_tokens)
+            loss = policy_gradient_loss(logps, torch.full_like(logps, text_weight), denominator)
+            if speech is not None:
+                frames = torch.cat([value for value in speech.values if value is not None])
+                loss = loss + speech_weight * frames.sum() / denominator
+                speech_sum += float(frames.detach().sum())
             loss.backward()
             loss_value += float(loss.detach())
             row_tokens = sum(doc.length for doc in row)
@@ -132,26 +149,45 @@ class SftTrainer(Trainer):
             update_tok_s=_ratio(processed, elapsed),
             peak_memory_gb=_peak_memory_gb(),
             reserved_memory_gb=_peak_reserved_gb(),
+            speech_frames=n_frames,
+            speech_loss=speech_sum / n_frames if n_frames else 0.0,
         )
 
 
-def _image_kwargs(documents: Sequence[Document]) -> dict[str, Any]:
-    """The `images` argument of `score_sequences`: only if some document has images."""
-    if all(doc.images is None for doc in documents):
-        return {}
-    return {"images": [doc.images for doc in documents]}
+def _speech_generator(policy: Policy, seed: int, step: int) -> torch.Generator:
+    """Generator of the masked codebooks of a step: the same masks for the same seed and step (resume)."""
+    generator = torch.Generator(device=policy.device)
+    generator.manual_seed(int(seed) * 1_000_003 + int(step))
+    return generator
+
+
+def _document_kwargs(documents: Sequence[Document]) -> dict[str, Any]:
+    """The `masks` and `media` arguments of `score_sequences`: only if some document has them."""
+    kwargs: dict[str, Any] = {}
+    if any(doc.mask is not None for doc in documents):
+        kwargs["masks"] = [doc.text_mask() for doc in documents]
+    if any(doc.media is not None for doc in documents):
+        kwargs["media"] = [doc.media for doc in documents]
+    return kwargs
 
 
 def evaluate_nll(policy: Policy, documents: Sequence[Document], max_tokens: int) -> dict[str, Any]:
-    """Mean NLL of the loss tokens without gradients: overall (weighted by tokens) and per item."""
+    """Mean NLL of the loss tokens without gradients: overall (weighted by tokens) and per item.
+
+    Speech frames (`kind: speech`) are reported apart: `speech_loss` — the mean depth-decoder loss per frame with the
+    masks of a fixed seed, so evaluations at different steps compare.
+    """
     policy.set_use_cache(False)
     policy.eval()
+    n_frames = sum(doc.speech_frames for doc in documents)
+    speech = SpeechLosses([None] * len(documents), _speech_generator(policy, 0, 0)) if n_frames else None
     values = score_sequences(
         policy,
         [doc.item_pair() for doc in documents],
         max_tokens=max_tokens,
         micro_batch_size=1,
-        **_image_kwargs(documents),
+        speech=speech,
+        **_document_kwargs(documents),
     )
     per_item: dict[str, list[float]] = {}
     total = 0.0
@@ -163,12 +199,17 @@ def evaluate_nll(policy: Policy, documents: Sequence[Document], max_tokens: int)
         entry[1] += doc.loss_tokens
         total += nll
         tokens += doc.loss_tokens
-    return {
+    result: dict[str, Any] = {
         "nll": total / tokens if tokens else 0.0,
         "tokens": tokens,
         "documents": len(documents),
         "per_item": {item: round(nll / count, 4) for item, (nll, count) in sorted(per_item.items()) if count},
     }
+    if speech is not None:
+        frames = [value for value in speech.values if value is not None]
+        result["speech_frames"] = n_frames
+        result["speech_loss"] = float(torch.cat(frames).float().mean()) if frames else 0.0
+    return result
 
 
 def _write_json(path: Path, payload: Any) -> None:
@@ -176,14 +217,14 @@ def _write_json(path: Path, payload: Any) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
-def build_plan(cfg: JoltConfig, tokenizer: Any, images: ImageEncoder | None = None) -> tuple[SftPlan, list[Document]]:
+def build_plan(cfg: JoltConfig, tokenizer: Any, media: MediaEncoder | None = None) -> tuple[SftPlan, list[Document]]:
     """Step plan built from the corpus (and the replay corpus), and the documents of the corpus `test` split for NLL.
 
-    `images` is the image encoder of a vision-language model (records with `images`).
+    `media` holds the media encoders of the model (records with images, audio or speech answers).
     """
     sft = cfg.sft
     max_tokens = int(sft.max_tokens)
-    documents, stats = tokenize_records(load_corpora(sft.corpus, "train"), tokenizer, max_tokens, images)
+    documents, stats = tokenize_records(load_corpora(sft.corpus, "train"), tokenizer, max_tokens, media)
     logger.info(
         "corpus %s: records %d (%s), documents %d, windows for %d long texts, dropped %d",
         ", ".join(Path(path).name for path in sft.corpus),
@@ -195,10 +236,10 @@ def build_plan(cfg: JoltConfig, tokenizer: Any, images: ImageEncoder | None = No
     )
     replay: list[Document] = []
     if Path(sft.replay) != UNSET_PATH and sft.replay_ratio > 0:
-        replay, replay_stats = tokenize_records(load_corpus(sft.replay, "train"), tokenizer, max_tokens, images)
+        replay, replay_stats = tokenize_records(load_corpus(sft.replay, "train"), tokenizer, max_tokens, media)
         logger.info("replay %s: documents %d, share of tokens ≈ %.2f", sft.replay, len(replay), sft.replay_ratio)
     test: list[Document] = []
-    test, _ = tokenize_records(load_corpora(sft.corpus, "test", missing_ok=True), tokenizer, max_tokens, images)
+    test, _ = tokenize_records(load_corpora(sft.corpus, "test", missing_ok=True), tokenizer, max_tokens, media)
     plan = SftPlan(
         documents,
         max_tokens=max_tokens,
@@ -232,7 +273,7 @@ def run_sft(cfg: JoltConfig, *, init_from: str | Path | None = None, resume: str
     if cfg.sft.eval_tasks:
         load_tasks(cfg.task.dataset, cfg.eval.split)
     policy = load_policy(cfg)
-    plan, test_docs = build_plan(cfg, policy.tokenizer, policy.images)
+    plan, test_docs = build_plan(cfg, policy.tokenizer, policy.media)
     requested, cfg = cfg, resolve_schedule(cfg, plan.steps_per_epoch)
     logger.info(
         "plan: rows per epoch %d of ≤ %d tokens, %d rows per step — %.2f steps per epoch; %d steps — %.2f epochs",
@@ -341,6 +382,22 @@ def _eval_step(
         _write_json(Path(artifacts.eval_dir) / f"nll-step-{step}.json", result)
         row["eval_nll"] = round(result["nll"], 6)
         logger.info("evaluation (step %d): corpus test NLL %.4f on %d tokens", step, result["nll"], result["tokens"])
+        if "speech_loss" in result:
+            row["eval_speech_loss"] = round(result["speech_loss"], 6)
+            logger.info(
+                "evaluation (step %d): speech loss %.4f on %d frames",
+                step,
+                result["speech_loss"],
+                result["speech_frames"],
+            )
+        if any(doc.speech_frames or (doc.media is not None and doc.media.audio) for doc in test_docs):
+            from .speech_eval import evaluate_speech
+
+            speech = evaluate_speech(
+                policy, test_docs, limit=int(cfg.eval.limit), out_dir=Path(artifacts.eval_dir) / f"speech-step-{step}"
+            )
+            _write_json(Path(artifacts.eval_dir) / f"speech-step-{step}.json", speech)
+            row |= {key: value for key, value in speech.items() if key.startswith("eval_")}
     if cfg.sft.eval_tasks:
         _run_eval(cfg, policy, artifacts, step)
     gc.collect()
@@ -382,8 +439,8 @@ def make_replay(
         load_model_weights(policy, checkpoint)
     tokenizer = policy.tokenizer
     tasks = _select_tasks(load_tasks(dataset, split), limit, int(cfg.run.seed))
-    if any(task.images for task in tasks):
-        raise ValueError("a replay corpus is made of `completion` records, which cannot carry the tasks' images")
+    if any(task.images or task.audio for task in tasks):
+        raise ValueError("a replay corpus is made of `completion` records, which cannot carry the tasks' media")
     pairs = [build_prompts(task, privileged=None, tokenizer=tokenizer) for task in tasks]
     batch = EvalConfig(limit=len(tasks), max_new_tokens=max_new_tokens, batch_size=int(cfg.eval.batch_size))
     trajectories = generate(

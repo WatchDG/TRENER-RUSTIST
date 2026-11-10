@@ -17,10 +17,19 @@ Text positions are plain 1-D: image features replace the embeddings of the `<|im
 
 from __future__ import annotations
 
+from typing import Any
+
+import torch
 from transformers import AutoModelForImageTextToText
 
 from . import lfm3
 from .base import LANGUAGE, PROJECTOR, VISION, Architecture
+
+
+def image_features(model: Any, pixel_values: torch.Tensor, grid: torch.Tensor) -> list[torch.Tensor]:
+    """Features of each image: the vision tower and the projector (`get_image_features` splits them per image)."""
+    return list(model.get_image_features(pixel_values, grid, return_dict=True).pooler_output)
+
 
 ARCHITECTURE = Architecture(
     name="Lfm3VlForConditionalGeneration",
@@ -33,6 +42,7 @@ ARCHITECTURE = Architecture(
         VISION: ("model.vision_tower",),
         PROJECTOR: ("model.multi_modal_projector",),
     },
+    image_features=image_features,
 )
 
 

@@ -1,0 +1,51 @@
+# Preset: teach LFM3-Omni-2B Russian speech (docs/13-speech.md §5) — speech recognition on FLEURS ru, speech synthesis
+# on the model's own Russian speech kept where its recognition understands it.
+# Russian is a text language of the model but not one of its speech languages. The corpora are built in advance:
+#   python scripts/build_fleurs_speech_corpus.py --out data/fleurs-ru-speech-0001
+#   python scripts/build_self_speech_corpus.py --source data/fleurs-ru-speech-0001 --out data/self-speech-ru-0001 --with-asr
+# Train: the FLEURS recognition records (`Perform ASR in Russian.`, audio → transcription) and, for the FLEURS texts,
+# the best of 2 own syntheses (`Perform TTS in Russian using a female|male voice.`) with a round trip error ≤ 5%.
+# The FLEURS recordings themselves are not synthesis targets: many crowd speakers under one voice prompt break the
+# model's free-running speech (§5). Test: FLEURS dev as is. The depth decoder predicts one frame from one hidden state,
+# the language model carries the speech over time: `language` trains with `voice` and `audio`; vision stays frozen.
+run:
+  name: self_speech_ru_omni_sft
+  seed: 0
+  out_dir: runs
+  checkpoint_every_epochs: 1
+  release_cache: true
+  pinned_checkpoint: true
+method: sft
+model:
+  path: models/LFM3-Omni-2B
+  dtype: bfloat16
+  trust_remote_code: true
+  attn_implementation: sdpa
+  gradient_checkpointing: true
+  compile_kernels: true
+  trainable: [language, audio, voice]
+  audio_max_seconds: 30.0
+sft:
+  corpus: data/self-speech-ru-0001
+  max_tokens: 4096
+  rows_per_step: 8
+  eval_tasks: false
+  text_loss_weight: 1.0
+  speech_loss_weight: 1.0
+optim:
+  lr: 1.0e-5
+  audio_lr_scale: 1.0
+  voice_lr_scale: 2.0
+  optimizer: adafactor
+  master_weights: true
+  max_grad_norm: 1.0
+  epochs: 2
+  schedule: cosine
+  warmup_steps: 8
+  master_storage: split
+eval:
+  every_epochs: 1          # text NLL, speech loss, TTS round trip CER and ASR CER on FLEURS dev
+  split: test
+  limit: 16                # texts spoken and clips transcribed per evaluation
+  max_new_tokens: 256
+  batch_mode: auto

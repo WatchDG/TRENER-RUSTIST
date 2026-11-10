@@ -7,6 +7,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-11-10
+
+### Added
+
+- LFM3-Omni-2B (`Lfm3OmniForConditionalGeneration`,
+  [LiquidAI/LFM3-Omni-2B](https://huggingface.co/LiquidAI/LFM3-Omni-2B)): the architecture module
+  `trener/architectures/lfm3_omni.py` (built by the checkpoint's code through `AutoModelForImageTextToText`; module
+  groups `language`, `vision`, `projector`, `audio` — the speech encoder and its projector — and `voice` — the
+  speech-frame embeddings and the depth decoder) and `docs/13-speech.md`.
+- Audio in the data: the optional `audio` field of a `jolt-tasks` record and of a `qa` corpus record (a spoken question;
+  a `qa` record with audio may have an empty question — speech recognition), stamped in the manifest
+  (`audio: {files, sha256}`). `trener/audio.py` reads clips with `soundfile`, resamples them (a windowed-sinc
+  resampler; torchaudio has no build for the pipeline's torch) and expands `<|audio|>` into the clip's tokens (12.5 per
+  second, `model.audio_max_seconds`).
+- Speech answers: the corpus record kind `speech` (`system`, `text`, `speech` — the recording the model says). The
+  codec of the checkpoint encodes the recording into frames (cached in `.cache/speech-codes/`), the answer is
+  `<|audio_start|>`, one `<|audio_out|>` per frame and the end-of-speech frame, `<|im_end|>` (the layout of the
+  checkpoint's processor). `sft` scores the frames through the depth decoder (`trener/speech.py`, the checkpoint's
+  `audio_loss` with masks from a seeded generator) and pools text and speech like the checkpoint's `combined_loss`
+  (`sft.text_loss_weight`, `sft.speech_loss_weight`); metrics `speech_frames`, `speech_loss`.
+- Speech evaluation (`trener/speech_eval.py`): the speech loss with fixed masks, the speech synthesis round trip
+  (the model speaks the test texts, the recordings are saved, the model transcribes them; `eval_tts_cer`) and speech
+  recognition of the test clips (`eval_asr_cer`).
+- `model.trainable` / `lora.modules` take `audio` and `voice`; `optim.audio_lr_scale`, `optim.voice_lr_scale`.
+- Russian speech: `scripts/build_fleurs_speech_corpus.py` (google/fleurs at a pinned revision, CC-BY-4.0; per
+  recording a recognition and a synthesis record, edges trimmed of silence) and `scripts/build_self_speech_corpus.py`
+  (the model's own speech of the corpus texts, best of N kept where its own recognition understands it, plus the
+  recognition records; the held-out split stays the source's). Synthesis targets from FLEURS recordings (many crowd
+  speakers under one voice prompt) break the model's free-running speech, its own speech does not (docs/13-speech.md
+  §5). Presets `configs/sft_lfm3_omni_fleurs_ru.yaml` and `configs/smoke_sft_lfm3_omni_fleurs_ru.yaml`.
+- Spoken questions: `datasets/rust-voice/rust-keywords-voice-0001` and its generator
+  `scripts/make_rust_keywords_voice_0001.py` (rust-keywords questions spoken by LFM3-Omni's own speech synthesis),
+  preset `configs/smoke_lfm3_omni_voice_jolt.yaml`.
+- Dependencies: `soundfile` (with `cffi`, `pycparser`).
+
+### Changed
+
+- The media of a prompt travel as one value, `trener.media.Media` (images, audio clips, speech frames):
+  `PromptPair.media`, `Trajectory.media`, `Document.media`, `score_sequences(media=...)`,
+  `StaticDecoder.generate/start(media=...)`, `build_prompts(media=...)`, `Policy.media` (the encoders,
+  `trener.media.MediaEncoder`) replace the `images` arguments of 0.9.0; `media_embeds` replaces `multimodal_embeds`
+  and reads the features through `Architecture.image_features` / `audio_features` / `speech_embeds`.
+- A model can name tokens a text answer never contains (`Architecture.text_suppress`): the static decode engine masks
+  them in sampling and the scoring of rollouts uses the same mask (`score_sequences(text_mode=True)`); and tokens
+  that end a text answer besides EOS (`Architecture.text_stop`, `Policy.stop_ids`; LFM3-Omni: `<|text_end|>`).
+- The `hf` engine passes the model's own generation arguments (`Architecture.hf_generate_kwargs`) and resets the
+  generation fields a model's own `generate` refuses (`_generation_fields_unsupported`).
+- `use_jolt_attention` and `fuse_model` skip every media group (the speech encoder and the depth decoder as well as the
+  vision tower).
+
 ## [0.9.0] - 2026-11-09
 
 ### Added
@@ -217,7 +267,8 @@ First release.
 - Tests that need the LFM3 tokenizer are skipped when `models/LFM3-1.7B` is
   absent instead of failing.
 
-[Unreleased]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.6.0...v0.7.0

@@ -6,9 +6,15 @@ for the splits. A record is one document about one item (``item``, for example
 
 * ``text`` — raw text (``text``, optional ``title``): loss on the whole text;
 * ``qa`` — a question and an answer in the model's chat template (``question``, ``answer``,
-  optional ``system``, ``thinking`` and ``images``): loss only on the model's turn; a record without ``thinking`` is
-  rendered in the template's mode without reasoning (`trener.chat_format.NO_THINKING`); ``images`` — image files
-  of the corpus directory shown before the question (a vision-language model, `trener.vision`);
+  optional ``system``, ``thinking``, ``images`` and ``audio``): loss only on the model's turn; a record without
+  ``thinking`` is rendered in the template's mode without reasoning (`trener.chat_format.NO_THINKING`); ``images``
+  and ``audio`` — files of the corpus directory shown before the question (`trener.media`); with ``audio`` the
+  question may be empty (speech recognition: the answer is the transcription);
+* ``speech`` — a speech answer (LFM3-Omni, `trener.speech`): ``text`` is the user turn, ``speech`` a recording
+  (a file of the corpus directory) the model must say in reply, optional ``system`` (for example
+  ``Perform TTS in Russian using a female voice.``). The model's turn is `<|audio_start|>`, one `<|audio_out|>`
+  per codec frame of the recording plus the end-of-speech frame, and `<|im_end|>`: the frames are trained through
+  the depth decoder, `<|audio_start|>` and `<|im_end|>` as text;
 * ``completion`` — prompt and response strings as they are, without the chat template (``prompt``,
   ``completion``): loss on the response. This is how plain-text "Question/Answer" pairs
   and repetitions of the model's own answers are written (a prompt with the template
@@ -42,8 +48,8 @@ from typing import Any
 import numpy as np
 
 from .chat_format import NO_THINKING
-from .data import DataError, image_files_seal, parse_image_paths
-from .vision import ImageEncoder, Images, expand_image_tokens, image_message
+from .data import MEDIA_FIELDS, DataError, image_files_seal, parse_media_paths
+from .media import Media, MediaEncoder, user_content
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +57,7 @@ CORPUS_FORMAT = "jolt-corpus"
 CORPUS_FORMAT_VERSION = 1
 CORPUS_MANIFEST = "corpus.json"
 
-KINDS = ("text", "qa", "completion")
+KINDS = ("text", "qa", "completion", "speech")
 
 #: Record fields by kind (besides the common ``id``, ``item``, ``kind``, ``meta``).
 _KIND_FIELDS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
@@ -59,10 +65,11 @@ _KIND_FIELDS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
     "text": (("text",), ("title",)),
     "qa": (("question", "answer"), ("system", "thinking")),
     "completion": (("prompt", "completion"), ()),
+    "speech": (("text",), ("system",)),
 }
 _COMMON_FIELDS = ("id", "item", "kind", "meta")
-#: Kinds whose records may carry ``images`` (a list of paths, not a string field).
-_IMAGE_KINDS = ("qa",)
+#: Media fields (lists of paths, not strings) each kind may carry.
+_MEDIA_KINDS: dict[str, tuple[str, ...]] = {"qa": ("images", "audio"), "speech": ("speech",)}
 _MANIFEST_FIELDS = ("format", "format_version", "name", "description", "source", "splits")
 
 #: How many tokens of the previous window the next window of a long text receives as context (without loss).
@@ -77,8 +84,16 @@ class CorpusRecord:
     item: str
     kind: str
     fields: Mapping[str, str]
-    #: Absolute paths of the record's images (``qa`` only); empty — a text-only record.
+    #: Absolute paths of the record's images and audio clips (``qa`` only); empty — a text-only record.
     images: tuple[str, ...] = ()
+    audio: tuple[str, ...] = ()
+    #: Absolute path of the recording of a speech answer (``speech`` only).
+    speech: str | None = None
+
+    @property
+    def audio_files(self) -> tuple[str, ...]:
+        """Every audio file of the record: the clips and the speech recording."""
+        return (*self.audio, *((self.speech,) if self.speech else ()))
 
 
 @dataclass
@@ -89,8 +104,14 @@ class Document:
     item: str
     prompt: np.ndarray
     completion: np.ndarray
-    #: Images of the prompt (their tokens are already expanded in `prompt`); `None` — a text-only document.
-    images: Images | None = None
+    #: Media of the document (their tokens are already expanded); `None` — a text-only document.
+    media: Media | None = None
+    #: Text targets of the completion (`False` — a speech frame, trained through the depth decoder); `None` — all.
+    mask: np.ndarray | None = None
+    #: The system prompt and the reference text of a `qa`/`speech` record (speech evaluation, `trener.speech_eval`):
+    #: the answer of a `qa` record, the text to say of a `speech` record.
+    system: str = ""
+    reference: str = ""
 
     @property
     def length(self) -> int:
@@ -98,7 +119,17 @@ class Document:
 
     @property
     def loss_tokens(self) -> int:
-        return int(self.completion.shape[0])
+        """Text tokens of the loss."""
+        return int(self.mask.sum()) if self.mask is not None else int(self.completion.shape[0])
+
+    @property
+    def speech_frames(self) -> int:
+        """Speech frames of the loss (the frames of the completion)."""
+        return int(self.completion.shape[0]) - self.loss_tokens if self.mask is not None else 0
+
+    def text_mask(self) -> list[bool] | None:
+        """The mask of `score_sequences` (`None` — every completion token is a text target)."""
+        return self.mask.tolist() if self.mask is not None else None
 
     def item_pair(self) -> tuple[list[int], list[int]]:
         """Pair (prompt, completion) for `score_sequences`."""
@@ -177,29 +208,49 @@ def corpus_splits(corpus_dir: str | Path) -> list[str]:
 
 
 def _parse_record(raw: Any, where: str, root: Path | None = None) -> CorpusRecord:
-    """One corpus record; ``root`` is the corpus directory (``images`` are resolved against it)."""
+    """One corpus record; ``root`` is the corpus directory (media paths are resolved against it)."""
     if not isinstance(raw, dict):
         raise DataError(f"{where}: the record must be a JSON object")
     kind = raw.get("kind")
     if kind not in KINDS:
         raise DataError(f"{where}: kind={kind!r}; allowed: {list(KINDS)}")
     required, optional = _KIND_FIELDS[kind]
-    extra = ("images",) if kind in _IMAGE_KINDS else ()
+    extra = _MEDIA_KINDS.get(kind, ())
     unknown = sorted(set(raw) - set(_COMMON_FIELDS) - set(required) - set(optional) - set(extra))
     if unknown:
         raise DataError(f"{where}: unknown fields {unknown} for kind={kind!r}")
+    # speech recognition: the user turn may be the audio alone
+    may_be_empty = {"question"} if kind == "qa" and raw.get("audio") else set()
     for key in ("id", "item", *required):
-        if not isinstance(raw.get(key), str) or not raw[key].strip():
+        value = raw.get(key)
+        if not isinstance(value, str) or (not value.strip() and key not in may_be_empty):
             raise DataError(f"{where}: field {key} must be a non-empty string")
     for key in optional:
         if key in raw and not isinstance(raw[key], str):
             raise DataError(f"{where}: field {key} must be a string")
     values = {key: raw[key] for key in (*required, *optional) if key in raw}
     try:
-        images = parse_image_paths(raw.get("images"), root)
+        images = parse_media_paths(raw.get("images"), root, "images")
+        audio = parse_media_paths(raw.get("audio"), root, "audio")
+        speech: str | None = None
+        if kind == "speech":
+            if not isinstance(raw.get("speech"), str):
+                raise ValueError("field speech must be the path of the recording within the corpus directory")
+            (speech,) = parse_media_paths([raw["speech"]], root, "audio")
     except ValueError as exc:
         raise DataError(f"{where}: {exc}") from exc
-    return CorpusRecord(record_id=raw["id"], item=raw["item"], kind=kind, fields=values, images=images)
+    return CorpusRecord(
+        record_id=raw["id"], item=raw["item"], kind=kind, fields=values, images=images, audio=audio, speech=speech
+    )
+
+
+def _media_seals(directory: Path, records: Sequence[CorpusRecord]) -> dict[str, dict[str, Any]]:
+    """Stamps of the image and audio files of ``records`` (a field without files has none)."""
+    seals = {
+        "images": image_files_seal(directory, (path for record in records for path in record.images)),
+        "audio": image_files_seal(directory, (path for record in records for path in record.audio_files)),
+    }
+    return {key: seal for key, seal in seals.items() if seal is not None}
 
 
 def load_corpus(corpus_dir: str | Path, split: str, *, check_seal: bool = True) -> list[CorpusRecord]:
@@ -220,7 +271,7 @@ def load_corpus(corpus_dir: str | Path, split: str, *, check_seal: bool = True) 
                 f"{path}: sha256 does not match the manifest — `trener data validate-corpus --update-manifest`"
             )
         count = 0
-        image_paths: list[str] = []
+        file_records: list[CorpusRecord] = []
         with path.open(encoding="utf-8") as stream:
             for number, line in enumerate(stream, start=1):
                 if not line.strip():
@@ -235,15 +286,18 @@ def load_corpus(corpus_dir: str | Path, split: str, *, check_seal: bool = True) 
                     raise DataError(f"{where}: duplicate id {record.record_id!r}")
                 seen.add(record.record_id)
                 records.append(record)
-                image_paths.extend(record.images)
+                file_records.append(record)
                 count += 1
         if check_seal and "records" in item and item["records"] != count:
             raise DataError(f"{path}: {count} records, but the manifest says {item['records']}")
-        if check_seal and "images" in item and item["images"] != image_files_seal(directory, image_paths):
-            raise DataError(
-                f"{path}: the images of the records do not match the manifest — "
-                "`trener data validate-corpus --update-manifest`"
-            )
+        if check_seal:
+            seals = _media_seals(directory, file_records)
+            changed = [key for key in MEDIA_FIELDS if key in item and item[key] != seals.get(key)]
+            if changed:
+                raise DataError(
+                    f"{path}: the {' and '.join(changed)} of the records do not match the manifest — "
+                    "`trener data validate-corpus --update-manifest`"
+                )
     return records
 
 
@@ -268,14 +322,22 @@ def load_corpora(corpus_dirs: Sequence[str | Path], split: str, *, missing_ok: b
 def record_json(
     record: CorpusRecord, meta: Mapping[str, Any] | None = None, root: str | Path | None = None
 ) -> dict[str, Any]:
-    """Corpus record as a JSON object (field order: id, item, kind, the fields of the kind, images, meta).
+    """Corpus record as a JSON object (field order: id, item, kind, the fields of the kind, media, meta).
 
-    ``root`` is the corpus directory: ``images`` are written relative to it.
+    ``root`` is the corpus directory: media paths are written relative to it.
     """
     payload: dict[str, Any] = {"id": record.record_id, "item": record.item, "kind": record.kind, **record.fields}
+    base = Path(root).resolve() if root is not None else None
+
+    def relative(path: str) -> str:
+        return Path(path).relative_to(base).as_posix() if base else path
+
     if record.images:
-        base = Path(root).resolve() if root is not None else None
-        payload["images"] = [Path(path).relative_to(base).as_posix() if base else path for path in record.images]
+        payload["images"] = [relative(path) for path in record.images]
+    if record.audio:
+        payload["audio"] = [relative(path) for path in record.audio]
+    if record.speech:
+        payload["speech"] = relative(record.speech)
     if meta:
         payload["meta"] = dict(meta)
     return payload
@@ -306,9 +368,7 @@ def write_corpus(
             path = directory / file_name
             _write_text_atomic(path, "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows))
             items.append({"file": file_name, "records": len(rows), "sha256": _sha256(path)})
-            seal = image_files_seal(directory, (image for record in parsed for image in record.images))
-            if seal is not None:
-                items[-1]["images"] = seal
+            items[-1].update(_media_seals(directory, parsed))
         entries[split] = {"files": items}
     manifest = {
         "format": CORPUS_FORMAT,
@@ -335,16 +395,15 @@ def update_corpus_manifest(corpus_dir: str | Path) -> dict[str, Any]:
                 lines = [line for line in stream if line.strip()]
             item["records"] = len(lines)
             item["sha256"] = _sha256(path)
-            images = [
-                image
-                for number, line in enumerate(lines, start=1)
-                for image in _parse_record(json.loads(line), f"{path}:{number}", directory).images
+            parsed = [
+                _parse_record(json.loads(line), f"{path}:{number}", directory) for number, line in enumerate(lines, 1)
             ]
-            seal = image_files_seal(directory, images)
-            if seal is None:
-                item.pop("images", None)
-            else:
-                item["images"] = seal
+            seals = _media_seals(directory, parsed)
+            for key in MEDIA_FIELDS:
+                if key in seals:
+                    item[key] = seals[key]
+                else:
+                    item.pop(key, None)
     _write_text_atomic(directory / CORPUS_MANIFEST, json.dumps(manifest, ensure_ascii=False, indent=2) + "\n")
     load_corpus(directory, "train")
     return manifest
@@ -361,12 +420,12 @@ def corpus_fingerprint(corpus_dir: str | Path) -> dict[str, Any]:
 
 
 def _file_seal(item: Mapping[str, Any]) -> str | None:
-    """Seal of a corpus file: its ``sha256``, combined with the stamp of its images when it has any."""
+    """Seal of a corpus file: its ``sha256``, combined with the stamps of its media when it has any."""
     seal = item.get("sha256")
-    images = item.get("images")
-    if seal is None or not isinstance(images, Mapping):
+    parts = [str(item[key].get("sha256")) for key in MEDIA_FIELDS if isinstance(item.get(key), Mapping)]
+    if seal is None or not parts:
         return seal
-    return hashlib.sha256(f"{seal}\n{images.get('sha256')}".encode("ascii")).hexdigest()
+    return hashlib.sha256("\n".join([seal, *parts]).encode("ascii")).hexdigest()
 
 
 # ------------------------------------------------------------- tokenization
@@ -380,7 +439,7 @@ def _array(tokens: Sequence[int]) -> np.ndarray:
     return np.asarray(tokens, dtype=np.int32)
 
 
-def _chat_pair(tokenizer: Any, fields: Mapping[str, str], n_images: int = 0) -> tuple[str, str]:
+def _chat_pair(tokenizer: Any, fields: Mapping[str, str], n_images: int = 0, n_audio: int = 0) -> tuple[str, str]:
     """Prompt (up to the model's turn) and the model's turn for a ``qa`` record via the model's chat template.
 
     A record without ``thinking`` is rendered in the template's mode without reasoning: the empty reasoning goes
@@ -390,7 +449,7 @@ def _chat_pair(tokenizer: Any, fields: Mapping[str, str], n_images: int = 0) -> 
     messages: list[dict[str, Any]] = []
     if fields.get("system"):
         messages.append({"role": "system", "content": fields["system"]})
-    messages.append({"role": "user", "content": image_message(fields["question"], n_images)})
+    messages.append({"role": "user", "content": user_content(fields["question"], n_images, n_audio)})
     answer: dict[str, Any] = {"role": "assistant", "content": fields["answer"]}
     options: dict[str, Any] = {}
     if "thinking" in fields:
@@ -403,6 +462,23 @@ def _chat_pair(tokenizer: Any, fields: Mapping[str, str], n_images: int = 0) -> 
         raise DataError(
             "the chat template does not continue the prompt with the assistant turn — cannot build the qa record"
         )
+    return prompt, full[len(prompt) :]
+
+
+def _speech_pair(tokenizer: Any, fields: Mapping[str, str]) -> tuple[str, str]:
+    """Prompt and the model's turn of a ``speech`` record: `<|audio_start|>`, one `<|audio_out|>`, `<|im_end|>`.
+
+    The single `<|audio_out|>` stands for the frames of the recording (`MediaEncoder.expand` repeats it).
+    """
+    messages: list[dict[str, Any]] = []
+    if fields.get("system"):
+        messages.append({"role": "system", "content": fields["system"]})
+    messages.append({"role": "user", "content": fields["text"]})
+    answer = {"role": "assistant", "content": [{"type": "text", "text": "<|audio_start|>"}, {"type": "audio_out"}]}
+    prompt = tokenizer.apply_chat_template(messages, add_generation_prompt=True, tokenize=False, **NO_THINKING)
+    full = tokenizer.apply_chat_template([*messages, answer], tokenize=False, **NO_THINKING).rstrip()
+    if not full.startswith(prompt):
+        raise DataError("the chat template does not continue the prompt with the speech turn")
     return prompt, full[len(prompt) :]
 
 
@@ -431,12 +507,13 @@ def _text_windows(
 
 
 def tokenize_records(
-    records: Iterable[CorpusRecord], tokenizer: Any, max_tokens: int, images: ImageEncoder | None = None
+    records: Iterable[CorpusRecord], tokenizer: Any, max_tokens: int, media: MediaEncoder | None = None
 ) -> tuple[list[Document], TokenizeStats]:
-    """Corpus documents: texts are split into windows; ``qa``/``completion`` records longer than a row are dropped.
+    """Corpus documents: texts are split into windows; other records longer than a row are dropped.
 
-    ``images`` is the image encoder of a vision-language model: a ``qa`` record with images gets their tokens in the
-    prompt (`trener.vision.expand_image_tokens`). Without it a record with images is an error.
+    ``media`` holds the media encoders of the model (`trener.media`): a record with images or audio gets their
+    tokens in the prompt, a ``speech`` record gets the codec frames of its recording. Without them such a record is
+    an error.
     """
     stats = TokenizeStats()
     documents: list[Document] = []
@@ -456,27 +533,51 @@ def tokenize_records(
                 stats.windowed_records += 1
             documents.extend(pieces)
             continue
-        pictures: Images | None = None
-        if record.images:
-            if images is None:
-                raise DataError(
-                    f"{record.record_id}: the record has images, but the model has no vision tower (model.path)"
-                )
-            pictures = images.describe(record.images)
+        described: Media | None = None
+        what = f"record {record.record_id}"
+        try:
+            if record.images or record.audio:
+                if media is None:
+                    raise ValueError(f"{what} has media, but the model takes none (model.path)")
+                described = media.describe(record.images, record.audio, what=what)
+            if record.speech:
+                if media is None:
+                    raise ValueError(f"{what} has a speech answer, but the model does not speak (model.path)")
+                described = Media(speech=media.speech(record.speech, what=what))
+        except ValueError as exc:
+            raise DataError(str(exc)) from exc
+        mask: np.ndarray | None = None
         if record.kind == "qa":
-            prompt_text, completion_text = _chat_pair(tokenizer, record.fields, len(record.images))
+            prompt_text, completion_text = _chat_pair(tokenizer, record.fields, len(record.images), len(record.audio))
+        elif record.kind == "speech":
+            prompt_text, completion_text = _speech_pair(tokenizer, record.fields)
         else:
             prompt_text, completion_text = record.fields["prompt"], record.fields["completion"]
         prompt = _encode(tokenizer, prompt_text)
-        if pictures is not None and images is not None:
-            prompt = expand_image_tokens(prompt, pictures, images.image_token_id)
+        if described is not None and media is not None and not record.speech:
+            prompt = media.expand(prompt, described)
         if record.kind == "completion" and prefix and prompt[:1] != prefix:
             prompt = [*prefix, *prompt]  # a ready chat prompt already starts with BOS, plain text does not
         completion = _encode(tokenizer, completion_text)
+        if record.speech and described is not None and media is not None:
+            completion = media.expand(completion, described)
+            mask = np.asarray([token != media.audio_out_token_id for token in completion], dtype=bool)
         if not prompt or not completion or len(prompt) + len(completion) > max_tokens:
             stats.dropped.append(record.record_id)
             continue
-        documents.append(Document(record.record_id, record.item, _array(prompt), _array(completion), pictures))
+        reference = record.fields.get("text", "") if record.kind == "speech" else record.fields.get("answer", "")
+        documents.append(
+            Document(
+                record.record_id,
+                record.item,
+                _array(prompt),
+                _array(completion),
+                described,
+                mask,
+                system=record.fields.get("system", ""),
+                reference=reference,
+            )
+        )
     stats.documents = len(documents)
     if stats.dropped:
         logger.warning(

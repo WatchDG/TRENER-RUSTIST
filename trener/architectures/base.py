@@ -1,16 +1,20 @@
 """Description of a model architecture: what the pipeline does differently for it.
 
 An architecture is named by the `architectures` field of the model's `config.json` (`Lfm3ForCausalLM`,
-`Lfm3VlForConditionalGeneration`, `Spark2_5ForCausalLM`, `LlamaForCausalLM`). Its description holds everything that
-differs between architectures: how the model is built, where its decoder layers are, which modules of a decoder layer
-write into the residual stream (abliteration, `trener.abliteration`) and which groups of modules can be trained
-separately (`model.trainable`, `lora.modules`): `language` — the language model, and for a vision-language model also
-`vision` (the vision tower) and `projector` (the projection of image features into the language model).
+`Lfm3VlForConditionalGeneration`, `Lfm3OmniForConditionalGeneration`, `Spark2_5ForCausalLM`, `LlamaForCausalLM`). Its
+description holds everything that differs between architectures: how the model is built, where its decoder layers
+are, which modules of a decoder layer write into the residual stream (abliteration, `trener.abliteration`), which
+groups of modules can be trained separately (`model.trainable`, `lora.modules`) and how the model turns media into
+input embeddings (`trener.media`).
+
+Module groups: `language` — the language model; a vision-language model adds `vision` (the vision tower) and
+`projector` (the projection of image features into the language model); a model with speech adds `audio` (the speech
+encoder and its projector: hearing) and `voice` (the speech-frame embeddings and the depth decoder: speaking).
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -24,8 +28,14 @@ LANGUAGE = "language"
 VISION = "vision"
 #: The projection of image features into the language model's embeddings.
 PROJECTOR = "projector"
+#: The speech encoder and its projector (speech input).
+AUDIO = "audio"
+#: The speech-frame embeddings and the depth decoder (speech output).
+VOICE = "voice"
 #: All module groups the pipeline knows, in a fixed order.
-MODULE_GROUPS = (LANGUAGE, VISION, PROJECTOR)
+MODULE_GROUPS = (LANGUAGE, VISION, PROJECTOR, AUDIO, VOICE)
+#: Groups whose modules keep their own attention and are not fused: encoders and the depth decoder of the media.
+MEDIA_GROUPS = (VISION, PROJECTOR, AUDIO, VOICE)
 
 #: A text-only model is one group: every module belongs to the language model.
 TEXT_ONLY_GROUPS: dict[str, tuple[str, ...]] = {LANGUAGE: ("",)}
@@ -54,6 +64,19 @@ class Architecture:
     layers_path: str = "model.layers"
     #: Module groups: group → module path prefixes from the top-level model (an empty prefix — every module).
     module_groups: dict[str, tuple[str, ...]] = field(default_factory=lambda: dict(TEXT_ONLY_GROUPS))
+    #: `(model, pixel_values, image_grid_thw) -> [features of each image]` — image features in the language model's
+    #: width; `None` — the model has no images.
+    image_features: Callable[..., list[torch.Tensor]] | None = None
+    #: `(model, input_features, feature_attention_mask) -> [features of each clip]` — speech-input features.
+    audio_features: Callable[..., list[torch.Tensor]] | None = None
+    #: `(model, codes [frames, codebooks]) -> embeddings [frames, hidden]` — input embeddings of speech frames.
+    speech_embeds: Callable[..., torch.Tensor] | None = None
+    #: `(config) -> token ids` never sampled in a text answer (mode switches, media placeholders).
+    text_suppress: Callable[[Any], tuple[int, ...]] | None = None
+    #: `(config) -> token ids` that end a text answer besides the end of a turn (EOS).
+    text_stop: Callable[[Any], tuple[int, ...]] | None = None
+    #: Extra arguments of the model's own `generate` for a text answer (the `hf` engine).
+    hf_generate_kwargs: dict[str, Any] = field(default_factory=dict)
 
     @property
     def native(self) -> bool:
@@ -64,6 +87,29 @@ class Architecture:
     def vision(self) -> bool:
         """The model has a vision tower: its prompts can carry images."""
         return VISION in self.module_groups
+
+    @property
+    def hearing(self) -> bool:
+        """The model has a speech encoder: its prompts can carry audio clips."""
+        return AUDIO in self.module_groups
+
+    @property
+    def speaking(self) -> bool:
+        """The model writes speech frames (a depth decoder): a corpus can teach it speech."""
+        return VOICE in self.module_groups
+
+    @property
+    def multimodal(self) -> bool:
+        """The model takes media besides text."""
+        return self.vision or self.hearing or self.speaking
+
+    def stop_ids(self, config: Any) -> tuple[int, ...]:
+        """Token ids that end a text answer of this model besides EOS (empty — none)."""
+        return tuple(self.text_stop(config)) if self.text_stop is not None else ()
+
+    def suppressed_ids(self, config: Any) -> tuple[int, ...]:
+        """Token ids never sampled in a text answer of this model (empty — none)."""
+        return tuple(self.text_suppress(config)) if self.text_suppress is not None else ()
 
     def group_of(self, name: str) -> str:
         """Group of the parameter or module `name`: the group with the longest matching prefix."""
@@ -122,10 +168,13 @@ GENERIC = Architecture(
 
 
 __all__ = [
+    "AUDIO",
     "GENERIC",
     "LANGUAGE",
+    "MEDIA_GROUPS",
     "MODULE_GROUPS",
     "PROJECTOR",
+    "VOICE",
     "TEXT_ONLY_GROUPS",
     "VISION",
     "Architecture",

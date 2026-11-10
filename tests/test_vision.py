@@ -17,11 +17,12 @@ from trener.attention import JOLT_SDPA
 from trener.config import LoraConfig, OptimConfig, RolloutConfig
 from trener.data import Task
 from trener.decode import StaticDecoder
+from trener.media import Media, media_embeds
 from trener.modeling import build_policy
 from trener.prompts import build_prompts
 from trener.rollout import STUDENT, TEACHER, generate_roles
 from trener.scoring import score_sequences
-from trener.vision import ImageRef, Images, expand_image_tokens, multimodal_embeds
+from trener.vision import ImageRef
 
 ROOT = Path(__file__).resolve().parents[1]
 VL_PATH = ROOT / "models" / "LFM3-VL-2B"
@@ -47,13 +48,13 @@ def _rollout(engine: str, **kwargs: Any) -> RolloutConfig:
     return RolloutConfig(**(base | kwargs))
 
 
-def _reference_logprobs(policy: Any, prompt: list[int], completion: list[int], images: Images | None) -> torch.Tensor:
+def _reference_logprobs(policy: Any, prompt: list[int], completion: list[int], media: Media | None) -> torch.Tensor:
     """Log-probabilities of the completion from the checkpoint's own forward with `pixel_values`."""
     model = policy.model
     input_ids = torch.tensor([prompt + completion])
     kwargs: dict[str, Any] = {}
-    if images is not None:
-        pixel_values, grid = policy.images.pixels(list(images.items))
+    if media is not None:
+        pixel_values, grid = policy.media.images.pixels(list(media.images))
         kwargs = {"pixel_values": pixel_values.float(), "image_grid_thw": grid}
     with torch.no_grad():
         logits = model(input_ids=input_ids, use_cache=False, **kwargs).logits[0].float()
@@ -107,37 +108,37 @@ def test_vision_tower_keeps_its_attention_and_the_language_model_switches(tiny_v
 
 
 def test_encoder_budget_and_token_counts(vl_encoder: Any, vl_images: list[Path]) -> None:
-    images = vl_encoder.describe(vl_images)
+    images = vl_encoder.images.describe(vl_images)
     assert len(images) == 3
-    for ref in images.items:
+    for ref in images:
         t, h, w = ref.grid
         assert t == 1 and ref.n_tokens == h * w // 4
-        assert vl_encoder.min_tokens <= ref.n_tokens <= vl_encoder.max_tokens
-    pixel_values, grid = vl_encoder.pixels(images.items)
-    assert pixel_values.shape == (sum(4 * ref.n_tokens for ref in images.items), 1536)
-    assert grid.tolist() == [list(ref.grid) for ref in images.items]
+        assert vl_encoder.images.min_tokens <= ref.n_tokens <= vl_encoder.images.max_tokens
+    pixel_values, grid = vl_encoder.images.pixels(images)
+    assert pixel_values.shape == (sum(4 * ref.n_tokens for ref in images), 1536)
+    assert grid.tolist() == [list(ref.grid) for ref in images]
 
 
-def test_expand_image_tokens_checks_the_count() -> None:
-    images = Images((ImageRef("a.png", (1, 4, 6)), ImageRef("b.png", (1, 2, 2))))
-    expanded = expand_image_tokens([1, IMAGE_TOKEN, 2, IMAGE_TOKEN, 3], images, IMAGE_TOKEN)
+def test_expand_image_tokens_checks_the_count(vl_encoder: Any) -> None:
+    images = (ImageRef("a.png", (1, 4, 6)), ImageRef("b.png", (1, 2, 2)))
+    expanded = vl_encoder.expand([1, IMAGE_TOKEN, 2, IMAGE_TOKEN, 3], Media(images=images))
     assert expanded == [1, *[IMAGE_TOKEN] * 6, 2, IMAGE_TOKEN, 3]
     with pytest.raises(ValueError, match="2 image placeholder"):
-        expand_image_tokens([1, IMAGE_TOKEN, IMAGE_TOKEN], Images(images.items[:1]), IMAGE_TOKEN)
+        vl_encoder.expand([1, IMAGE_TOKEN, IMAGE_TOKEN], Media(images=images[:1]))
 
 
 def test_prompts_show_the_images_to_both_roles(vl_tokenizer: Any, vl_encoder: Any, vl_images: list[Path]) -> None:
     task = _task(vl_images[:2])
-    pair = build_prompts(task, tokenizer=vl_tokenizer, images=vl_encoder)
-    assert pair.images is not None and len(pair.images) == 2
-    expected = pair.images.total_tokens
+    pair = build_prompts(task, tokenizer=vl_tokenizer, media=vl_encoder)
+    assert pair.media is not None and len(pair.media.images) == 2
+    expected = pair.media.image_tokens
     assert pair.student_ids.count(IMAGE_TOKEN) == pair.teacher_ids.count(IMAGE_TOKEN) == expected
     assert pair.student_text.count("<|image|>") == pair.teacher_text.count("<|image|>") == 2
     # the images come before the question in the user turn
     assert pair.student_text.index("<|vision_start|><|image|><|vision_end|>") < pair.student_text.index(task.question)
-    without = build_prompts(Task("t1", task.question, "42", privileged="42"), tokenizer=vl_tokenizer, images=vl_encoder)
-    assert without.images is None and IMAGE_TOKEN not in without.student_ids
-    with pytest.raises(ValueError, match="no vision tower"):
+    without = build_prompts(Task("t1", task.question, "42", privileged="42"), tokenizer=vl_tokenizer, media=vl_encoder)
+    assert without.media is None and IMAGE_TOKEN not in without.student_ids
+    with pytest.raises(ValueError, match="takes no media"):
         build_prompts(task, tokenizer=vl_tokenizer)
 
 
@@ -146,18 +147,18 @@ def test_prompts_show_the_images_to_both_roles(vl_tokenizer: Any, vl_encoder: An
 
 def test_embeddings_match_the_checkpoint_forward(tiny_vl_policy: Any, vl_tokenizer: Any, vl_images: list[Path]) -> None:
     policy = tiny_vl_policy
-    pair = build_prompts(_task(vl_images[:2]), tokenizer=vl_tokenizer, images=policy.images)
+    pair = build_prompts(_task(vl_images[:2]), tokenizer=vl_tokenizer, media=policy.media)
     input_ids = torch.tensor([pair.student_ids])
-    pixel_values, grid = policy.images.pixels(list(pair.images.items))
+    pixel_values, grid = policy.media.images.pixels(list(pair.media.images))
     with torch.no_grad():
         reference = policy.model(
             input_ids=input_ids, pixel_values=pixel_values.float(), image_grid_thw=grid, use_cache=False
         ).logits
-        embeds = multimodal_embeds(policy.model, policy.images, input_ids, [pair.images])
+        embeds = media_embeds(policy.model, policy.media, input_ids, [pair.media])
         ours = policy.model(inputs_embeds=embeds, use_cache=False).logits
     torch.testing.assert_close(ours, reference, rtol=0, atol=1e-5)
     with pytest.raises(ValueError, match="image tokens in the input"):
-        multimodal_embeds(policy.model, policy.images, input_ids, [None])
+        media_embeds(policy.model, policy.media, input_ids, [None])
 
 
 @pytest.mark.parametrize("max_tokens", [0, 4096])
@@ -166,9 +167,9 @@ def test_scoring_with_images_matches_the_checkpoint(
 ) -> None:
     """Packed and unpacked scoring with images (shared images encoded once) equal the checkpoint's own forward."""
     policy = tiny_vl_policy
-    first = build_prompts(_task(vl_images[:2]), tokenizer=vl_tokenizer, images=policy.images)
-    second = build_prompts(_task(vl_images[2:], "t1"), tokenizer=vl_tokenizer, images=policy.images)
-    plain = build_prompts(Task("t2", "Say hi.", "hi", privileged="hi"), tokenizer=vl_tokenizer, images=policy.images)
+    first = build_prompts(_task(vl_images[:2]), tokenizer=vl_tokenizer, media=policy.media)
+    second = build_prompts(_task(vl_images[2:], "t1"), tokenizer=vl_tokenizer, media=policy.media)
+    plain = build_prompts(Task("t2", "Say hi.", "hi", privileged="hi"), tokenizer=vl_tokenizer, media=policy.media)
     completion = [1000, 2000, 3000, 4000, 5]
     items = [
         (first.student_ids, completion),
@@ -176,8 +177,8 @@ def test_scoring_with_images_matches_the_checkpoint(
         (second.student_ids, completion),
         (plain.student_ids, completion),
     ]
-    images = [first.images, first.images, second.images, None]
-    values = score_sequences(policy, items, micro_batch_size=2, max_tokens=max_tokens, images=images)
+    images = [first.media, first.media, second.media, None]
+    values = score_sequences(policy, items, micro_batch_size=2, max_tokens=max_tokens, media=images)
     for (prompt, tokens), pictures, value in zip(items, images, values, strict=True):
         reference = _reference_logprobs(policy, list(prompt), list(tokens), pictures)
         torch.testing.assert_close(value, reference, rtol=0, atol=2e-4)
@@ -187,13 +188,11 @@ def test_gradient_reaches_the_vision_tower_and_the_projector(
     vl_model_factory: Any, vl_tokenizer: Any, vl_encoder: Any, vl_images: list[Path]
 ) -> None:
     policy = build_policy(
-        vl_model_factory(), vl_tokenizer, device=torch.device("cpu"), dtype="float32", images=vl_encoder
+        vl_model_factory(), vl_tokenizer, device=torch.device("cpu"), dtype="float32", media=vl_encoder
     )
-    pair = build_prompts(_task(vl_images[:1]), tokenizer=vl_tokenizer, images=vl_encoder)
+    pair = build_prompts(_task(vl_images[:1]), tokenizer=vl_tokenizer, media=vl_encoder)
     policy.train()
-    values = score_sequences(
-        policy, [(pair.student_ids, [11, 12, 13])], grad=True, max_tokens=1024, images=[pair.images]
-    )
+    values = score_sequences(policy, [(pair.student_ids, [11, 12, 13])], grad=True, max_tokens=1024, media=[pair.media])
     (-values[0].sum()).backward()
     grads = {group: 0.0 for group in (LANGUAGE, VISION, PROJECTOR)}
     architecture = architecture_of(policy.model)
@@ -216,7 +215,7 @@ def test_trainable_groups_freeze_the_rest_and_scale_the_learning_rate(
         device=torch.device("cpu"),
         dtype="float32",
         trainable=[VISION, PROJECTOR],
-        images=vl_encoder,
+        media=vl_encoder,
     )
     architecture = architecture_of(policy.model)
     assert policy.info["trainable_groups"] == [PROJECTOR, VISION]
@@ -234,9 +233,9 @@ def test_trainable_groups_freeze_the_rest_and_scale_the_learning_rate(
         assert scale == (0.25 if architecture.group_of(name) == VISION else 2.0)
 
     # the image features still carry the gradient into the vision tower through the frozen language model
-    pair = build_prompts(_task(vl_images[:1]), tokenizer=vl_tokenizer, images=vl_encoder)
+    pair = build_prompts(_task(vl_images[:1]), tokenizer=vl_tokenizer, media=vl_encoder)
     policy.train()
-    values = score_sequences(policy, [(pair.student_ids, [11, 12])], grad=True, max_tokens=1024, images=[pair.images])
+    values = score_sequences(policy, [(pair.student_ids, [11, 12])], grad=True, max_tokens=1024, media=[pair.media])
     (-values[0].sum()).backward()
     assert all(param.grad is not None for param in policy.master_params)
 
@@ -311,9 +310,9 @@ def test_static_decoder_with_images_matches_generate(
 ) -> None:
     policy = tiny_vl_policy
     pairs = [
-        build_prompts(_task(vl_images[:2]), tokenizer=vl_tokenizer, images=policy.images),
-        build_prompts(_task(vl_images[2:], "t1", "Describe it."), tokenizer=vl_tokenizer, images=policy.images),
-        build_prompts(Task("t2", "Say hi.", "hi", privileged="hi"), tokenizer=vl_tokenizer, images=policy.images),
+        build_prompts(_task(vl_images[:2]), tokenizer=vl_tokenizer, media=policy.media),
+        build_prompts(_task(vl_images[2:], "t1", "Describe it."), tokenizer=vl_tokenizer, media=policy.media),
+        build_prompts(Task("t2", "Say hi.", "hi", privileged="hi"), tokenizer=vl_tokenizer, media=policy.media),
     ]
     results = {}
     for engine in ("hf", "static"):
@@ -324,11 +323,11 @@ def test_static_decoder_with_images_matches_generate(
     for role in (STUDENT, TEACHER):
         hf, static = results["hf"][role], results["static"][role]
         assert [t.completion_ids for t in hf] == [t.completion_ids for t in static]
-        assert [t.images for t in static] == [pair.images for pair in pairs]
+        assert [t.media for t in static] == [pair.media for pair in pairs]
 
     decoder = StaticDecoder(policy, _rollout("static"))
-    with pytest.raises(ValueError, match="image entries"):
-        decoder.generate([pairs[0].student_ids], max_new_tokens=2, do_sample=False, images=[None, None])
+    with pytest.raises(ValueError, match="media entries"):
+        decoder.generate([pairs[0].student_ids], max_new_tokens=2, do_sample=False, media=[None, None])
 
 
 # ------------------------------------------------------------------------ data
@@ -356,9 +355,9 @@ def test_sample_corpus_tokenizes_with_images(vl_tokenizer: Any, vl_encoder: Any)
     documents, stats = tokenize_records(records[:4], vl_tokenizer, 2048, vl_encoder)
     assert stats.documents == 4
     for document in documents:
-        assert document.images is not None
-        assert int((document.prompt == IMAGE_TOKEN).sum()) == document.images.total_tokens
-    with pytest.raises(DataError, match="no vision tower"):
+        assert document.media is not None
+        assert int((document.prompt == IMAGE_TOKEN).sum()) == document.media.image_tokens
+    with pytest.raises(DataError, match="takes none"):
         tokenize_records(records[:1], vl_tokenizer, 2048)
 
 
@@ -404,14 +403,14 @@ def test_real_lfm3_vl_trains_the_vision_layers(project_root: Path) -> None:
     assert policy.info["architecture"] == "Lfm3VlForConditionalGeneration"
     assert policy.info["trainable_groups"] == [LANGUAGE, PROJECTOR, VISION]
     task = load_tasks(DATASET, "test")[0]
-    pair = build_prompts(task, tokenizer=policy.tokenizer, images=policy.images)
+    pair = build_prompts(task, tokenizer=policy.tokenizer, media=policy.media)
     trajectories = generate_roles(policy, [pair], _rollout("static", max_new_tokens=256), (TEACHER,), group_size=1)
     trajectory = trajectories[TEACHER][0]
-    assert trajectory.images == pair.images and trajectory.completion_ids
+    assert trajectory.media is pair.media and trajectory.completion_ids
 
     policy.train()
     values = score_sequences(
-        policy, [(pair.student_ids, trajectory.completion_ids)], grad=True, max_tokens=4096, images=[pair.images]
+        policy, [(pair.student_ids, trajectory.completion_ids)], grad=True, max_tokens=4096, media=[pair.media]
     )
     (-values[0].mean()).backward()
     architecture = architecture_of(policy.model)

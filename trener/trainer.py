@@ -213,13 +213,13 @@ def _ratio(numerator: float, denominator: float) -> float:
 
 
 def _mask_kwargs(trajectories: Sequence[Trajectory]) -> dict[str, Any]:
-    """The `masks` and `images` arguments for `score_sequences`: only if some trajectory has a mask (dialog) or
-    images (a vision-language model)."""
-    kwargs: dict[str, Any] = {}
+    """Arguments of `score_sequences` for rollout trajectories: text answers (`text_mode`), and `masks` / `media`
+    only if some trajectory has a mask (dialog) or media (images, audio clips)."""
+    kwargs: dict[str, Any] = {"text_mode": True}
     if any(trajectory.train_mask is not None for trajectory in trajectories):
         kwargs["masks"] = [trajectory.train_mask for trajectory in trajectories]
-    if any(trajectory.images is not None for trajectory in trajectories):
-        kwargs["images"] = [trajectory.images for trajectory in trajectories]
+    if any(trajectory.media is not None for trajectory in trajectories):
+        kwargs["media"] = [trajectory.media for trajectory in trajectories]
     return kwargs
 
 
@@ -397,7 +397,7 @@ class Trainer:
         if torch.cuda.is_available():
             torch.cuda.reset_peak_memory_stats()
 
-        pairs = [build_prompts(task, tokenizer=self.policy.tokenizer, images=self.policy.images) for task in batch]
+        pairs = [build_prompts(task, tokenizer=self.policy.tokenizer, media=self.policy.media) for task in batch]
         by_id = {task.task_id: task for task in batch}
 
         roles = (STUDENT, TEACHER) if self.uses_teacher else (STUDENT,)

@@ -521,6 +521,10 @@ def cmd_data_validate(args: argparse.Namespace) -> int:
             print(
                 f"  {split}: with images — {summary.with_images[split]} tasks, {summary.image_files[split]} image files"
             )
+        if summary.with_audio.get(split):
+            print(
+                f"  {split}: with audio — {summary.with_audio[split]} tasks, {summary.audio_files[split]} audio files"
+            )
     for (first, second), shared in summary.overlap.items():
         print(f"  warning: {shared} identical questions in {first} and {second}")
     if summary.unsealed:
@@ -538,11 +542,11 @@ def _print_prompt_lengths(args: argparse.Namespace) -> None:
 
     cfg = load_config(args.config)
     tokenizer = load_tokenizer(cfg.model.path, trust_remote_code=cfg.model.trust_remote_code)
-    images = _image_encoder(cfg)
+    media = _media_encoder(cfg)
     longest = 0
     dialog = read_manifest(args.path).get("mode", "qa") == "tutor"
     for split in read_manifest(args.path)["splits"]:
-        pairs = [build_prompts(task, tokenizer=tokenizer, images=images) for task in load_tasks(args.path, split)]
+        pairs = [build_prompts(task, tokenizer=tokenizer, media=media) for task in load_tasks(args.path, split)]
         student = max((len(pair.student_ids) for pair in pairs), default=0)
         teacher = max((len(pair.teacher_ids) for pair in pairs), default=0)
         # dialog: the prompt is followed by a model turn, a user utterance and a second model turn
@@ -559,12 +563,15 @@ def _print_prompt_lengths(args: argparse.Namespace) -> None:
         )
 
 
-def _image_encoder(cfg: JoltConfig) -> Any:
-    """Image encoder of the config's model (`None` — a text-only model): image tokens count in prompt lengths."""
-    from .vision import load_image_encoder
+def _media_encoder(cfg: JoltConfig) -> Any:
+    """Media encoders of the config's model (`None` — a text-only model): media tokens count in prompt lengths."""
+    from .media import load_media_encoder
 
-    return load_image_encoder(
-        cfg.model.path, min_tokens=cfg.model.image_min_tokens, max_tokens=cfg.model.image_max_tokens
+    return load_media_encoder(
+        cfg.model.path,
+        image_min_tokens=cfg.model.image_min_tokens,
+        image_max_tokens=cfg.model.image_max_tokens,
+        audio_max_seconds=cfg.model.audio_max_seconds,
     )
 
 
@@ -641,15 +648,17 @@ def _print_corpus_plan(args: argparse.Namespace) -> None:
     cfg = _load(args)
     tokenizer = load_tokenizer(cfg.model.path, trust_remote_code=cfg.model.trust_remote_code)
     max_tokens = int(cfg.sft.max_tokens)
-    documents, stats = tokenize_records(load_corpora(args.path, "train"), tokenizer, max_tokens, _image_encoder(cfg))
+    documents, stats = tokenize_records(load_corpora(args.path, "train"), tokenizer, max_tokens, _media_encoder(cfg))
     loss_tokens = sum(doc.loss_tokens for doc in documents)
     total = sum(doc.length for doc in documents)
     plan = SftPlan(documents, max_tokens=max_tokens, rows_per_step=int(cfg.sft.rows_per_step), seed=cfg.run.seed)
     rows = plan.epoch_size(0)
     steps = resolve_schedule(cfg, plan.steps_per_epoch).optim.steps
+    frames = sum(doc.speech_frames for doc in documents)
+    speech = f", speech frames {frames}" if frames else ""
     print(
         f"  train: documents {stats.documents} (windows for {stats.windowed_records} texts, dropped "
-        f"{len(stats.dropped)}); loss tokens {loss_tokens}, total {total}"
+        f"{len(stats.dropped)}); loss tokens {loss_tokens}{speech}, total {total}"
     )
     print(
         f"  epoch: rows {rows} of ≤ {max_tokens} (fill {total / (rows * max_tokens):.1%}), "
