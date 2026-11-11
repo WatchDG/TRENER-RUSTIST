@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -235,6 +236,39 @@ def test_budget_and_lower_bound(lfm3_model_factory: Any) -> None:
     assert best_prefix(units, 6, COST, ctx.n_layers, max_elements=math.inf, max_units=10**9) is None
 
 
+def test_partial_rows_touch_their_elements_and_the_cache_saves_the_frozen_forward(lfm3_model_factory: Any) -> None:
+    ctx = _context(lfm3_model_factory())
+    whole = best_prefix(build_units("rows", ctx), -1, COST, ctx.n_layers, max_elements=math.inf, max_units=10**9)
+    ctx.partial_backward = True
+    units = build_units("rows", ctx)
+    assert units.own_touch.any() and len(units.own_touch) == len(units.gain)
+    partial = best_prefix(units, -1, COST, ctx.n_layers, max_elements=math.inf, max_units=10**9)
+    assert whole is not None and partial is not None
+    # the planted tensors are partial linear layers: backward touches their selected rows only
+    assert partial.touched < whole.touched and partial.seconds < whole.seconds
+    assert partial.touched >= sum(units.elements[partial.chosen][units.own_touch[partial.chosen]])
+
+    cached = replace(COST, forward_per_layer=0.01, cached_share=0.5, n_layers=ctx.n_layers)
+    assert cached.seconds(2, 0, 0) == pytest.approx(COST.seconds(2, 0, 0) - 0.01 * 0.5 * (ctx.n_layers - 2))
+    assert cached.seconds(ctx.n_layers, 0, 0) == COST.seconds(ctx.n_layers, 0, 0)  # nothing frozen below
+    upper = best_prefix(units, 5, cached, ctx.n_layers, max_elements=math.inf, max_units=10**9)
+    plain = best_prefix(units, 5, COST, ctx.n_layers, max_elements=math.inf, max_units=10**9)
+    assert upper is not None and plain is not None and upper.seconds < plain.seconds
+
+
+def test_cached_share_follows_the_epochs() -> None:
+    from types import SimpleNamespace
+
+    from trener.recipe_writer import cached_share
+
+    data = SimpleNamespace(plan=SimpleNamespace(steps_per_epoch=10.0))
+    cfg = JoltConfig(method="sft", optim=OptimConfig(steps=40))
+    assert cached_share(cfg, data, tune=True) == pytest.approx(0.75)
+    assert cached_share(cfg, data, tune=False) == 0.0  # the config has no cache and the tuning does not run
+    assert cached_share(JoltConfig(method="sft", optim=OptimConfig(steps=5)), data, tune=True) == 0.0
+    assert cached_share(JoltConfig(optim=OptimConfig(steps=40)), data, tune=True) == 0.0  # not sft
+
+
 def test_suffix_rules_cover_layers_with_the_same_selection(lfm3_model_factory: Any) -> None:
     model = lfm3_model_factory()
     ctx = _context(model)
@@ -326,7 +360,17 @@ def test_recipe_write_end_to_end(
     )
     result = run_recipe_write(cfg, options)
     recipe = load_recipe(result["recipe"])
-    assert recipe.name == "tiny" and set(recipe.sections) == {"model"}
+    assert recipe.name == "tiny" and set(recipe.sections) == {"model", "optim"}
+    # the tuning: checkpointing and the master storage measured on the winner
+    model, optim = recipe.sections["model"], recipe.sections["optim"]
+    assert {"selective_checkpointing", "checkpoint_free_layers"} <= model.keys()
+    assert optim["master_storage"] in ("fp32", "split")
+    tuning = recipe.source["tuning"]
+    assert tuning["step_s"] > 0 and all(item["step_s"] > 0 for item in tuning["measured"])
+    tried = [key for item in tuning["measured"] for key in item if key in ("start", "master_storage")]
+    assert "start" in tried and len(tuning["measured"]) >= 4
+    if "prefix_cache" in model:  # a frozen layer below the winner and more than one epoch
+        assert model["prefix_cache"] in ("ram", "disk") and tuning["prefix_cache"]["frozen_layers"] >= 1
     source = recipe.source
     assert source["method"] == "sft" and source["options"]["probe_steps"] == 3
     assert source["quality"]["metric"] == "nll" and "held-out items" in source["quality"]["held_out"]
@@ -337,6 +381,9 @@ def test_recipe_write_end_to_end(
     assert 0 < policy.info["n_trainable_parameters"] <= policy.info["n_parameters"]
     with pytest.raises(Exception, match="already exists"):
         run_recipe_write(cfg, options)
+    untuned = run_recipe_write(cfg, replace(options, force=True, tune=False, trials=0))
+    plain = load_recipe(untuned["recipe"])
+    assert set(plain.sections) == {"model"} and "tuning" not in plain.source
 
 
 def test_writer_rejects_lora_and_abliterate() -> None:

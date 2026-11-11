@@ -70,13 +70,19 @@ class OptimizerHandle:
         for index, region in enumerate(policy.master_regions):
             if region is None:
                 continue
+            parts: list[torch.Tensor] = []
+            # a linear layer with `model.partial_backward` computes its part's gradient alone (`trener.partial`)
+            leaf = policy.part_leaves.get(index)
+            if leaf is not None and leaf.grad is not None:
+                parts.append(leaf.grad)
+                leaf.grad = None
             param = policy.master_params[index]
-            if param.grad is None:
-                continue
-            part = region.take(param.grad)
-            previous = self.part_grads.get(index)
-            self.part_grads[index] = part if previous is None else previous.add_(part)
-            param.grad = None
+            if param.grad is not None:  # the full gradient of any other use of the weight
+                parts.append(region.take(param.grad))
+                param.grad = None
+            for part in parts:
+                previous = self.part_grads.get(index)
+                self.part_grads[index] = part if previous is None else previous.add_(part)
 
     def _grad(self, index: int) -> torch.Tensor | None:
         """Gradient of master parameter `index` in its master's shape (after `_gather_part_grads`)."""
@@ -89,9 +95,12 @@ class OptimizerHandle:
         self.part_grads.pop(index, None)
 
     def _all_grads(self) -> list[torch.Tensor]:
-        """Every gradient the step uses: the model's (whole parameters) and the trained parts of partial ones."""
+        """Every gradient the step uses: the model's (whole parameters) and the trained parts of partial ones.
+
+        Only the trained parameters (`master_params`) are walked: a frozen one has no gradient.
+        """
         self._gather_part_grads()
-        grads = [param.grad for param in self.policy.model.parameters() if param.grad is not None]
+        grads = [param.grad for param in self.policy.master_params if param.grad is not None]
         return grads + list(self.part_grads.values())
 
     def _step_order(self) -> list[int]:
@@ -107,12 +116,27 @@ class OptimizerHandle:
             order.reverse()
         return order
 
+    def warm_up(self) -> int:
+        """Compiles the fused Adafactor step for the shapes of the master weights, largest first
+        (`FunctionalAdafactor.warm_up`); returns the number of shapes, 0 without the fused step."""
+        if not isinstance(self.optimizer, FunctionalAdafactor) or not self.optimizer.fused:
+            return 0
+        policy = self.policy
+        shapes = []
+        for index, param in enumerate(policy.master_params):
+            region = policy.region(index)
+            shapes.append(tuple(param.shape) if region is None else region.part_shape)
+        dtype = policy.master_params[0].dtype if policy.master_params else torch.float32
+        return self.optimizer.warm_up(shapes, policy.device, dtype)
+
     def zero_grad(self) -> None:
-        """Clears the gradients of the model and the master parameters (none exist in `split` mode)."""
-        for param in self.policy.model.parameters():
+        """Clears the gradients of the trained parameters and their masters (none exist in `split` mode)."""
+        for param in self.policy.master_params:
             param.grad = None
         for master in self.master_parameters:
             master.grad = None
+        for leaf in self.policy.part_leaves.values():
+            leaf.grad = None
         self.part_grads.clear()
 
     def link_grads(self) -> None:
@@ -403,6 +427,7 @@ def build_optimizer(cfg: JoltConfig, policy: Policy) -> OptimizerHandle:
     for group in optimizer.param_groups:
         group["lr"] = float(cfg.optim.lr) * float(group.get("lr_scale", 1.0))
     handle.state["backend"] = backend
+    handle.warm_up()
     logger.info("optimizer: %s, master: %s, parameters: %d", backend, policy.master_storage, policy.n_master)
     return handle
 

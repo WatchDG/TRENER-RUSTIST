@@ -7,6 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-11-11
+
+### Added
+
+- `model.partial_backward` (default `true`, `trener/partial.py`): a linear layer of a decoder layer with a partial
+  weight (`model.trainable_weights`) computes the weight gradient of its selected part only — rows from the selected
+  output columns of `dY`, columns from the selected input columns of `X`, a scattered selection over the rows and
+  columns it spans — and accumulates it in a leaf of the part's shape. The full-size gradient of the weight is never
+  formed. A part spanning more than half of its weight keeps the full path. LFM3-1.7B, layers 12-23 with rows and
+  columns of `w1`, `w2`, `w3`, `q_proj`, `in_proj` (47M weights, `sft`, 4 × 2048 tokens, RTX 4090): step
+  0.814 → 0.734 s, peak memory 6.65 → 5.50 GB; losses equal up to rounding.
+- `model.prefix_cache: ram | disk` (`sft`, `trener/prefix_cache.py`): the input of the lowest trained decoder layer is
+  cached per document in the first epoch; a row whose documents are all cached enters at that layer, and the frozen
+  layers below are not run. The key covers a checksum of the frozen weights, the depth, the model config, the dtype and
+  the kernels, so `disk` (`model.prefix_cache_dir`) is shared by runs over the same frozen prefix. The first cached row
+  is checked against the whole forward; a mismatch turns the cache off with a warning. `metrics.jsonl` records
+  `prefix_cached_rows`. Cached rows against the same rows uncached, top 12 layers of LFM3-1.7B: step
+  1.037 → 0.928 s; the rows recipe above: 0.661 → 0.588 s.
+- `recipe write` measures the speed settings of the winner (`--no-tune` skips it): `optim.fused_step`,
+  `model.selective_checkpointing`, `model.checkpoint_free_layers` (up to the layers backward runs through, within
+  memory) and the other `optim.master_storage`, a few real steps each, and sets `model.prefix_cache` for a multi-epoch
+  `sft` run with frozen lower layers. The time model counts the selected rows of a partial linear layer as touched
+  (not the whole tensor) and subtracts the cached forward of the frozen layers, so candidates see both savings.
+- Recipes may set `model.partial_backward`, `model.prefix_cache`, `model.prefix_cache_gb`.
+
+### Fixed
+
+- `optim.fused_step` ran 10 ms per matrix on a recipe with partial tensors. The step is compiled with dynamic shapes
+  for the size of its first call, a training step goes from the smallest parameter up, and the reduction over the
+  whole update, compiled for a small tensor, ran as a single block over the large ones. The optimizer now runs every
+  master shape once when it is built, largest first (`FunctionalAdafactor.warm_up`): 57 partial tensors of
+  LFM3-1.7B, optimizer 0.234 → 0.063 s per step.
+
+### Changed
+
+- `sft` `optimizer_time_s` covers clipping, the schedule and the step, as in JOLT (was the step only).
+- The Adafactor step no longer computes `RMS(param)` each step: `transformers` reads it only with
+  `scale_parameter=True`; the state keeps the key. The update is bitwise unchanged.
+- The optimizer clears and collects the gradients of the trained parameters only, not of every model parameter.
+- `model.checkpoint_free_layers` is applied to every decoder layer, so a later call changes it in place.
+
 ## [0.15.0] - 2026-11-10
 
 ### Added
@@ -366,7 +407,8 @@ First release.
 - Tests that need the LFM3 tokenizer are skipped when `models/LFM3-1.7B` is
   absent instead of failing.
 
-[Unreleased]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.15.0...HEAD
+[Unreleased]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.16.0...HEAD
+[0.16.0]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.12.0...v0.13.0

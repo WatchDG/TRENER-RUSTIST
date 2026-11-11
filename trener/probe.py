@@ -14,8 +14,10 @@ keeps them whole.
 
 The time of a step is modelled as `t_base + t_layer·depth + t_weight·touched + t_element·trained` (`StepCost`):
 `depth` — the decoder layers backward runs through (from the lowest trained one up), `touched` — the elements of the
-tensors whose weight gradient backward computes (a partial tensor counts whole), `trained` — the elements the
-optimizer steps.
+weight gradients backward computes (a whole tensor; with `model.partial_backward` the selected rows or columns of a
+linear layer only, `trener.partial`; other partial tensors count whole), `trained` — the elements the optimizer steps.
+With the prefix cache (`model.prefix_cache`, `sft`) the forward of the frozen layers below is skipped in the share
+`cached_share` of the steps: `t_forward·(n_layers − depth)·cached_share` comes off.
 """
 
 from __future__ import annotations
@@ -337,9 +339,17 @@ class StepCost:
     per_element: float
     #: The measurements it was fitted to: `{"depth", "touched", "seconds"}` each.
     measured: list[dict[str, float]] = field(default_factory=list)
+    #: Forward of one decoder layer, seconds: what the prefix cache saves per frozen layer below the trained ones.
+    forward_per_layer: float = 0.0
+    #: Share of the steps whose rows start from the cache (`(epochs − 1)/epochs`; 0 — no cache).
+    cached_share: float = 0.0
+    n_layers: int = 0
 
-    def seconds(self, depth: float, touched: float, trained: float) -> float:
-        return self.base + self.per_layer * depth + self.per_weight * touched + self.per_element * trained
+    def seconds(self, depth: Any, touched: Any, trained: Any) -> Any:
+        total = self.base + self.per_layer * depth + self.per_weight * touched + self.per_element * trained
+        if self.cached_share > 0 and self.n_layers:
+            total = total - self.forward_per_layer * self.cached_share * np.maximum(self.n_layers - depth, 0)
+        return total
 
     def info(self) -> dict[str, Any]:
         return {
@@ -347,6 +357,8 @@ class StepCost:
             "per_layer_s": self.per_layer,
             "per_million_touched_s": self.per_weight * 1e6,
             "per_million_trained_s": self.per_element * 1e6,
+            "forward_per_layer_s": self.forward_per_layer,
+            "cached_share": self.cached_share,
             "measured": self.measured,
         }
 

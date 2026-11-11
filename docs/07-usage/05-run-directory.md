@@ -43,7 +43,8 @@ A `method: abliterate` run has its own layout (directions, the Optuna study, `ch
 | `rollout_useful_ratio` | `completion_tokens / (rows × decode_steps)` — share of useful tokens in decoding |
 | `scoring_useful_ratio` / `update_useful_ratio` | real tokens / tokens of padded batches in cross-scoring and optimization passes (with packing — 1) |
 | `rollout_tok_s` / `scoring_tok_s` / `update_tok_s` | processed tokens of the phase per second |
-| `forward_backward_time_s` / `optimizer_time_s` | only with `run.profile=true`: forward+backward of the optimization passes and clipping + `optimizer.step()` |
+| `forward_backward_time_s` / `optimizer_time_s` | only with `run.profile=true`: forward+backward of the optimization passes and clipping + the schedule + `optimizer.step()` (`sft` and JOLT alike) |
+| `prefix_cached_rows` | `sft` with `model.prefix_cache`: rows of the step that started from the cached states of the frozen layers ([§7.4](04-training.md)) |
 | `overlap_rows` / `overlap_time_s` | only with `rollout.overlap=true`: rows of cross-scoring and training executed during decoding, and the main thread's time on them. `rollout_time_s` then runs until the end of decoding (together with this work), while `scoring_time_s` and `update_time_s` cover only the work after decoding |
 
 The student's accuracy without `c` (greedy decoding) is written only to

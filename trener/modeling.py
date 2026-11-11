@@ -127,6 +127,11 @@ class Policy:
     #: Trained part of each master parameter (`model.trainable_weights`, `trener.regions`), by parameter index:
     #: `None` (or an empty list) — the whole tensor. The master of a partial parameter has the part's shape.
     master_regions: list[Region | None] = field(default_factory=list, repr=False)
+    #: Gradient leaves of the trained parts of partial linear weights (`model.partial_backward`, `trener.partial`),
+    #: by master index: backward accumulates a part's gradient into its leaf, not into the full `param.grad`.
+    part_leaves: dict[int, torch.Tensor] = field(default_factory=dict, repr=False)
+    #: Cache of the hidden states at the lowest trained layer (`model.prefix_cache`, `trener.prefix_cache`).
+    prefix_cache: Any = field(default=None, repr=False)
     #: Media encoders of a model with images or speech (`trener.media`); `None` — a text-only model.
     media: MediaEncoder | None = None
     #: Logit bias of a text answer: −inf at the tokens a text answer never contains (`Architecture.text_suppress`);
@@ -246,10 +251,12 @@ class Policy:
                 if callable(disable):
                     disable()
             self.selective_checkpointing = bool(selective)
-            if free_layers > 0:
-                layers = architecture_of(self.model).decoder_layers(self.model)
-                for layer in list(layers)[max(0, len(layers) - int(free_layers)) :]:
-                    layer.gradient_checkpointing = False
+            # every layer is set, so a later call with another `free_layers` changes the split in place
+            layers = list(architecture_of(self.model).decoder_layers(self.model))
+            first_free = max(0, len(layers) - max(0, int(free_layers)))
+            for position, layer in enumerate(layers):
+                if hasattr(layer, "gradient_checkpointing"):
+                    layer.gradient_checkpointing = position < first_free
         elif active:
             self.model.gradient_checkpointing_disable()
             self.selective_checkpointing = False
@@ -428,6 +435,7 @@ def build_policy(
     language_layers: Sequence[str] = (),
     trainable_weights: Sequence[dict[str, Any]] = (),
     media: MediaEncoder | None = None,
+    partial_backward: bool = True,
 ) -> Policy:
     """Builds a `Policy` from a ready model and tokenizer.
 
@@ -443,6 +451,8 @@ def build_policy(
     of the selected decoder layers get adapters. `trainable_weights` — rules of `model.trainable_weights`
     (`trener.regions`, full fine-tuning only): parameters no rule names are frozen, and a partial parameter gets a
     master of its selected part only. `media` — the media encoders of a model with images or speech.
+    `partial_backward` — the linear layers of partial weights compute the gradient of their part only
+    (`trener.partial`).
     """
     if master_storage not in ("fp32", "split"):
         raise ValueError(f"master_storage must be 'fp32' or 'split', got {master_storage!r}")
@@ -536,7 +546,7 @@ def build_policy(
         **_gpu_info(),
     }
 
-    return Policy(
+    policy = Policy(
         model=model,
         tokenizer=tokenizer,
         master_weights=master_weights,
@@ -553,6 +563,11 @@ def build_policy(
         master_regions=master_regions,
         media=media,
     )
+    if partial_backward and master_regions:
+        from .partial import install_partial_linear
+
+        info["partial_backward"] = install_partial_linear(policy)
+    return policy
 
 
 def _offload_available(cfg: JoltConfig, device: torch.device) -> bool:
@@ -612,6 +627,7 @@ def load_policy(cfg: JoltConfig, *, with_master: bool = True) -> Policy:
         language_layers=cfg.model.language_layers if with_master else (),
         trainable_weights=cfg.model.trainable_weights if with_master else (),
         media=media,
+        partial_backward=cfg.model.partial_backward,
     )
     policy.set_gradient_checkpointing(
         cfg.model.gradient_checkpointing,

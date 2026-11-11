@@ -73,6 +73,17 @@ def test_example_recipe_applies() -> None:
     assert cfg.model.language_layers == ["20-23", "norm"] and cfg.optim.master_storage == "split"
 
 
+def test_speed_fields_apply() -> None:
+    raw = yaml.safe_load(SMOKE.read_text(encoding="utf-8"))
+    recipe = {"model": {"partial_backward": False, "checkpoint_free_layers": 2}, "optim": {"fused_step": True}}
+    cfg = load_config(SMOKE, recipe=recipe)
+    assert cfg.model.partial_backward is False and cfg.model.checkpoint_free_layers == 2 and cfg.optim.fused_step
+    assert load_recipe({"model": {"prefix_cache": "disk", "prefix_cache_gb": 4}}).sections["model"]["prefix_cache"]
+    if raw.get("method", "jolt") != "sft":  # the smoke config is jolt: the prefix cache is for sft
+        with pytest.raises(ConfigError, match="for method sft"):
+            load_config(SMOKE, recipe={"model": {"prefix_cache": "ram"}})
+
+
 def test_missing_recipe_file(tmp_path: Path) -> None:
     with pytest.raises(ConfigError, match="recipe file not found"):
         load_recipe(tmp_path / "nope.yaml")

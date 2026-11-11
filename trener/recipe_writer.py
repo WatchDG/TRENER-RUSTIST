@@ -86,6 +86,9 @@ class WriterOptions:
     false_units: float = 1.0
     #: Backward runs per timed set of trained tensors (the fastest counts).
     time_steps: int = 2
+    #: Measure the speed settings for the winner (`_tune`): checkpointing, the fused step, the master storage, the
+    #: prefix cache.
+    tune: bool = True
 
     def check(self) -> None:
         if self.granularity not in LEVELS:
@@ -113,6 +116,7 @@ class WriterOptions:
             "false_units": self.false_units,
             "trials": self.trials,
             "trial_steps": self.trial_steps,
+            "tune": self.tune,
         }
 
 
@@ -258,6 +262,9 @@ class Units:
     b: np.ndarray
     #: `layers`: the part of each part index (a layer index, `embeddings`, `norm`, `group:<name>`).
     parts: list[Any] = field(default_factory=list)
+    #: The unit adds its own elements to `touched`, not its owner's: a row or column of a linear layer whose backward
+    #: computes the selected part only (`model.partial_backward`); empty — none.
+    own_touch: np.ndarray = field(default_factory=lambda: np.zeros(0, dtype=bool))
 
 
 @dataclass
@@ -275,6 +282,8 @@ class Context:
     block: int
     #: Units a level may take on noise alone, in expectation (`WriterOptions.false_units`).
     false_units: float = 1.0
+    #: `model.partial_backward` of the config: a partial linear layer computes the gradient of its part only.
+    partial_backward: bool = False
 
     def numel(self, index: int) -> int:
         return math.prod(self.shapes[index])
@@ -347,6 +356,7 @@ def build_units(level: str, ctx: Context) -> Units:
     a: list[np.ndarray] = []
     b: list[np.ndarray] = []
     owner_numel: list[int] = []
+    own: list[np.ndarray] = []
     z = unit_z(level, ctx)
 
     def significant(g: Any, noise: Any, n: Any) -> np.ndarray:
@@ -362,12 +372,14 @@ def build_units(level: str, ctx: Context) -> Units:
         n: np.ndarray,
         a_values: np.ndarray,
         b_values: np.ndarray,
-        own: int,
+        owner_index: int,
+        own_touch: bool = False,
     ) -> None:
         size = len(g)
+        own.append(np.full(size, own_touch, dtype=bool))
         gain.append(significant(g, noise, n))
         elements.append(np.asarray(n, dtype=np.int64))
-        owner.append(np.full(size, own, dtype=np.int64))
+        owner.append(np.full(size, owner_index, dtype=np.int64))
         place.append(np.full(size, ctx.places[index].level, dtype=np.int64))
         tensor.append(np.full(size, index, dtype=np.int64))
         a.append(np.asarray(a_values, dtype=np.int64))
@@ -391,7 +403,7 @@ def build_units(level: str, ctx: Context) -> Units:
             tensor.append(np.array([len(parts) - 1], dtype=np.int64))
             a.append(np.array([-1]))
             b.append(np.array([-1]))
-        return _units(level, gain, elements, owner, owner_numel, place, tensor, a, b, parts)
+        return _units(level, gain, elements, owner, owner_numel, place, tensor, a, b, parts, own)
 
     for index, gains in enumerate(ctx.gains):
         numel = ctx.numel(index)
@@ -405,10 +417,14 @@ def build_units(level: str, ctx: Context) -> Units:
         if level == "rows":
             row_values = significant(gains.rows, gains.rows_noise, d1 * rest)
             col_values = significant(gains.cols, gains.cols_noise, d0 * rest)
+            # a linear weight of a decoder layer: its backward computes the selected rows or columns only
+            partial = ctx.partial_backward and rest == 1 and 0 <= ctx.places[index].level < ctx.n_layers
             if _concentration(col_values) > _concentration(row_values):
-                add(index, gains.cols, gains.cols_noise, np.full(d1, d0 * rest), np.ones(d1), np.arange(d1), index)
+                cols_ = (np.full(d1, d0 * rest), np.ones(d1), np.arange(d1))
+                add(index, gains.cols, gains.cols_noise, *cols_, index, partial)
             else:
-                add(index, gains.rows, gains.rows_noise, np.full(d0, d1 * rest), np.zeros(d0), np.arange(d0), index)
+                rows_ = (np.full(d0, d1 * rest), np.zeros(d0), np.arange(d0))
+                add(index, gains.rows, gains.rows_noise, *rows_, index, partial)
         elif level == "blocks":
             grid0, grid1 = gains.blocks.shape
             heights = np.minimum(gains.block, d0 - np.arange(grid0) * gains.block)
@@ -421,10 +437,10 @@ def build_units(level: str, ctx: Context) -> Units:
             count = len(gains.weight_index)
             weights = (gains.weight_gain, gains.weight_noise, np.full(count, rest))
             add(index, *weights, gains.weight_index, np.zeros(count), index)
-    return _units(level, gain, elements, owner, owner_numel, place, tensor, a, b, [])
+    return _units(level, gain, elements, owner, owner_numel, place, tensor, a, b, [], own)
 
 
-def _units(level: str, gain, elements, owner, owner_numel, place, tensor, a, b, parts) -> Units:  # noqa: ANN001
+def _units(level: str, gain, elements, owner, owner_numel, place, tensor, a, b, parts, own) -> Units:  # noqa: ANN001
     def cat(items: list[np.ndarray], dtype: Any) -> np.ndarray:
         return np.concatenate(items).astype(dtype) if items else np.zeros(0, dtype=dtype)
 
@@ -439,6 +455,7 @@ def _units(level: str, gain, elements, owner, owner_numel, place, tensor, a, b, 
         a=cat(a, np.int64),
         b=cat(b, np.int64),
         parts=parts,
+        own_touch=cat(own, bool),
     )
 
 
@@ -493,7 +510,8 @@ def best_prefix(
     owners = units.owner[order]
     first = np.zeros(len(order))
     first[np.unique(owners, return_index=True)[1]] = 1.0
-    touched = np.cumsum(first * units.owner_numel[owners])
+    own = units.own_touch[order] if len(units.own_touch) else np.zeros(len(order), dtype=bool)
+    touched = np.cumsum(np.where(own, units.elements[order], first * units.owner_numel[owners]))
     depth = n_layers - np.clip(np.minimum.accumulate(units.place[order]), 0, n_layers)
     seconds = np.maximum(cost.seconds(depth, touched, elements), 1e-9)
     ratio = gain / seconds
@@ -700,6 +718,8 @@ def _probe(cfg: JoltConfig, options: WriterOptions, data_factory: Any) -> tuple[
     from .modeling import freeze_groups, load_policy
     from .trainer import load_model_weights
 
+    cfg = clone_config(cfg)
+    cfg.model.prefix_cache = "none"  # the probe and the timing runs go through every layer
     policy = load_policy(cfg, with_master=False)
     if options.init_from is not None:
         load_model_weights(policy, options.init_from)
@@ -768,6 +788,9 @@ def _probe(cfg: JoltConfig, options: WriterOptions, data_factory: Any) -> tuple[
     per_element = adafactor_seconds_per_element(policy.device, fused=bool(cfg.optim.fused_step))
     cost = fit_step_cost(measured, per_element)
     cost.base += statistics.median(other) if other else 0.0
+    # backward of a layer is about two forwards, plus the recomputed forward of a checkpointed layer
+    cost.forward_per_layer = cost.per_layer / (3.0 if cfg.model.gradient_checkpointing else 2.0)
+    cost.n_layers = n_layers
     logger.info(
         "recipe probe: step ≈ %.3fs + %.4fs per layer of depth + %.3fs per 1M touched + %.4fs per 1M trained",
         cost.base,
@@ -778,6 +801,8 @@ def _probe(cfg: JoltConfig, options: WriterOptions, data_factory: Any) -> tuple[
 
     architecture = _architecture(model)
     info = {"model_fingerprint": policy.model_fingerprint, "probe_storage": str(storage)}
+    embeddings = model.get_input_embeddings()
+    hidden_size = int(embeddings.weight.shape[-1]) if embeddings is not None else 0
     device = policy.device
     stats, steps = probe.stats, probe.steps
     # the model goes first: the gains of a tensor are computed on the device, one tensor at a time
@@ -815,7 +840,9 @@ def _probe(cfg: JoltConfig, options: WriterOptions, data_factory: Any) -> tuple[
         multimodal=len(architecture.module_groups) > 1,
         block=options.block,
         false_units=options.false_units,
+        partial_backward=bool(cfg.model.partial_backward),
     )
+    info["hidden_size"] = hidden_size
     return ctx, cost, data, quality, info
 
 
@@ -832,6 +859,7 @@ def _trial(cfg: JoltConfig, candidate: Candidate, options: WriterOptions, data: 
 
     trial_recipe = load_recipe({"name": candidate.name, "model": candidate.fields})
     trial_cfg = with_steps(apply_recipe(cfg, trial_recipe), options.trial_steps)
+    trial_cfg.model.prefix_cache = "none"  # a trial is shorter than an epoch: the cache would only fill
     policy = load_policy(trial_cfg)
     trainer = data.trainer(trial_cfg, policy)
     if options.init_from is not None:
@@ -869,6 +897,220 @@ def _trial(cfg: JoltConfig, candidate: Candidate, options: WriterOptions, data: 
     return result
 
 
+# ------------------------------------------------------------------ tuning
+
+#: Share of the device memory a tuned setting may reserve at its peak.
+MEMORY_SHARE = 0.95
+
+
+def _epochs(cfg: JoltConfig, data: Any) -> float:
+    """How many epochs the config's `sft` run makes (its steps over the steps of an epoch); 0 — unknown."""
+    plan = getattr(data, "plan", None)
+    if cfg.optim.epochs > 0:
+        return float(cfg.optim.epochs)
+    if plan is None:
+        return 0.0
+    per_epoch = float(plan.steps_per_epoch)
+    return float(cfg.optim.steps) / per_epoch if per_epoch > 0 else 0.0
+
+
+def cached_share(cfg: JoltConfig, data: Any, tune: bool) -> float:
+    """Share of the steps that would start from the prefix cache: `(epochs − 1)/epochs` for `sft` with the cache on
+    (in the config, or chosen by the tuning), else 0."""
+    if cfg.method != SFT_METHOD or not (tune or cfg.model.prefix_cache != "none"):
+        return 0.0
+    epochs = _epochs(cfg, data)
+    return max(0.0, 1.0 - 1.0 / epochs) if epochs > 1 else 0.0
+
+
+def _prefix_cache_mode(data: Any, hidden: int) -> tuple[str, float]:
+    """`ram` when the states of the corpus fit in half of the free host memory, otherwise `disk`; their size, GiB."""
+    documents = [*getattr(data.plan, "documents", []), *getattr(data, "test", [])]
+    size = sum(doc.length for doc in documents) * hidden * 2
+    try:
+        import psutil
+
+        free = psutil.virtual_memory().available
+    except Exception:  # pragma: no cover - psutil may be missing
+        free = 0
+    return ("ram" if size < free / 2 else "disk"), size / 2**30
+
+
+def _measure(data: Any, trainer: Any, steps: int, start: int) -> tuple[float, float]:
+    """Seconds of a step (the fastest of `steps` after a warmup step) and the peak reserved memory, GiB."""
+    seconds: list[float] = []
+    peak = 0.0
+    for offset in range(steps + 1):
+        metrics = data.step(trainer, start + offset)
+        if offset:
+            seconds.append(float(metrics.step_time_s))
+        peak = max(peak, float(getattr(metrics, "reserved_memory_gb", 0.0) or 0.0))
+    return min(seconds), peak
+
+
+def _tune(
+    cfg: JoltConfig, winner: Candidate, options: WriterOptions, data: Any, info: dict[str, Any]
+) -> dict[str, Any]:
+    """Speed settings for the winner's selection, each measured over a few real steps; the fastest that fits wins.
+
+    In place, on one loaded model: `optim.fused_step` (CUDA), `model.selective_checkpointing`,
+    `model.checkpoint_free_layers` (0, a quarter, a half and all of the layers backward runs through, until memory runs
+    out); then `optim.master_storage` on fresh loads. Every value is compared with the current best in the order
+    A B B A (`paired`), each run a warmup step and the fastest of `time_steps`. `model.prefix_cache` (`sft`, a frozen
+    layer below, more than one epoch) is not timed — it pays from the second epoch — and comes from the time model.
+    Returns `{"model": {...}, "optim": {...}, "step_s", "prefix_cache", "measured": [...]}`.
+    """
+    from .modeling import load_policy
+    from .schedule import with_steps
+
+    base = with_steps(apply_recipe(cfg, load_recipe({"name": winner.name, "model": winner.fields})), 10_000)
+    base.model.prefix_cache = "none"
+    cuda = torch.cuda.is_available()
+    limit = torch.cuda.mem_get_info()[1] / 2**30 * MEMORY_SHARE if cuda else math.inf
+    checkpointing = bool(base.model.gradient_checkpointing)
+    settings: dict[str, Any] = {
+        "fused_step": bool(base.optim.fused_step),
+        "selective_checkpointing": bool(base.model.selective_checkpointing),
+        "checkpoint_free_layers": int(base.model.checkpoint_free_layers),
+        "master_storage": str(base.optim.master_storage),
+    }
+    measured: list[dict[str, Any]] = []
+    position = 0
+
+    def run(trainer: Any, label: dict[str, Any]) -> float:
+        nonlocal position
+        _release()  # the allocator's cache of the previous setting would count as this one's reserved memory
+        try:
+            seconds, peak = _measure(data, trainer, options.time_steps, position)
+        except torch.cuda.OutOfMemoryError:
+            trainer.optimizer.zero_grad()
+            _release()
+            measured.append({**settings, **label, "step_s": None, "peak_gb": None, "fits": False})
+            logger.info("recipe tuning %s: out of memory", label)
+            return math.inf
+        position += options.time_steps + 1
+        fits = peak <= limit
+        measured.append({**settings, **label, "step_s": seconds, "peak_gb": peak, "fits": fits})
+        logger.info("recipe tuning %s: %.3fs per step, %.1f GiB peak", label, seconds, peak)
+        return seconds if fits else math.inf
+
+    def apply(policy: Any, trainer: Any, values: dict[str, Any]) -> None:
+        if hasattr(trainer.optimizer.optimizer, "fused"):
+            fused = bool(values["fused_step"]) and cuda
+            if fused and not trainer.optimizer.optimizer.fused:
+                trainer.optimizer.optimizer.fused = True
+                trainer.optimizer.warm_up()  # compiled for the largest shapes first, as `build_optimizer` does
+            trainer.optimizer.optimizer.fused = fused
+        if checkpointing:
+            policy.set_gradient_checkpointing(
+                True, selective=values["selective_checkpointing"], free_layers=values["checkpoint_free_layers"]
+            )
+
+    def paired(measure: Any, current: dict[str, Any], candidate: dict[str, Any], label: Any) -> tuple[float, float]:
+        """Seconds of `current` and of `candidate`, measured in the order A B B A: the card's speed drifts by several
+        percent over minutes (a desktop shares it), and the order takes a steady drift out of the difference."""
+        times: dict[bool, list[float]] = {False: [], True: []}
+        for is_candidate in (False, True, True, False):
+            values = candidate if is_candidate else current
+            times[is_candidate].append(measure(values, label(values)))
+            if math.isinf(times[is_candidate][-1]):
+                return statistics.mean(times[False]) if times[False] else math.inf, math.inf
+        return statistics.mean(times[False]), statistics.mean(times[True])
+
+    def sweep(policy: Any, trainer: Any, key: str, values: Sequence[Any]) -> float:
+        """Each value of `key` against the current best, in pairs; keeps the faster. Returns the best's seconds."""
+
+        def measure(values_: dict[str, Any], label: dict[str, Any]) -> float:
+            apply(policy, trainer, values_)
+            return run(trainer, label)
+
+        seconds = math.nan
+        for value in values:
+            if value == settings[key]:
+                continue
+            current, candidate = paired(measure, dict(settings), {**settings, key: value}, lambda v: {key: v[key]})
+            seconds = current
+            if candidate < current:
+                settings[key], seconds = value, candidate
+            elif key == "checkpoint_free_layers" and math.isinf(candidate):
+                break  # more free layers need more memory
+        apply(policy, trainer, settings)
+        return seconds
+
+    policy = load_policy(base)
+    trainer = data.trainer(base, policy)
+    if options.init_from is not None:
+        trainer.init_from(options.init_from)
+    apply(policy, trainer, settings)
+    best = run(trainer, {"start": True})
+    for key, values in (
+        ("fused_step", [False, True] if cuda else []),
+        ("selective_checkpointing", [False, True] if checkpointing else []),
+        (
+            "checkpoint_free_layers",
+            sorted({0, *(int(winner.depth) * part // 4 for part in (1, 2, 4))}) if checkpointing else [],
+        ),
+    ):
+        seconds = sweep(policy, trainer, key, values)
+        if not math.isnan(seconds):
+            best = seconds
+    del trainer, policy
+    _release()
+
+    if base.optim.optimizer == "adafactor" and base.model.dtype == "bfloat16" and not base.lora.enabled:
+        # the storage needs a load of its own: fresh loads in the order A B B A, with the settings found
+
+        def load_and_run(values: dict[str, Any], label: dict[str, Any]) -> float:
+            variant = clone_config(base)
+            variant.optim.master_storage = values["master_storage"]
+            variant.optim.master_offload = bool(base.optim.master_offload) and values["master_storage"] == "split"
+            variant.optim.fused_step = values["fused_step"]
+            variant.model.selective_checkpointing = values["selective_checkpointing"]
+            variant.model.checkpoint_free_layers = values["checkpoint_free_layers"]
+            loaded = load_policy(variant)
+            runner = data.trainer(variant, loaded)
+            if options.init_from is not None:
+                runner.init_from(options.init_from)
+            try:
+                return run(runner, label)
+            finally:
+                del runner, loaded
+                _release()
+
+        other = "split" if settings["master_storage"] == "fp32" else "fp32"
+        current, candidate = paired(
+            load_and_run,
+            dict(settings),
+            {**settings, "master_storage": other},
+            lambda v: {"master_storage": v["master_storage"], "load": "fresh"},
+        )
+        best = current
+        if candidate < current:
+            settings["master_storage"], best = other, candidate
+
+    model_fields: dict[str, Any] = {}
+    if checkpointing:
+        model_fields["selective_checkpointing"] = settings["selective_checkpointing"]
+        model_fields["checkpoint_free_layers"] = settings["checkpoint_free_layers"]
+    lower = int(info["n_layers"]) - int(winner.depth)
+    cache: dict[str, Any] | None = None
+    if cfg.method == SFT_METHOD and lower >= 1 and _epochs(cfg, data) > 1 and info.get("hidden_size"):
+        mode, size_gb = _prefix_cache_mode(data, int(info["hidden_size"]))
+        model_fields["prefix_cache"] = mode
+        cache = {"mode": mode, "frozen_layers": lower, "size_gb": round(size_gb, 2)}
+    optim_fields: dict[str, Any] = {"master_storage": settings["master_storage"]}
+    if cuda:
+        optim_fields["fused_step"] = settings["fused_step"]
+    logger.info("recipe tuning: %s %s, %.3fs per step", model_fields, optim_fields, best)
+    return {
+        "model": model_fields,
+        "optim": optim_fields,
+        "step_s": best if math.isfinite(best) else None,
+        "prefix_cache": cache,
+        "measured": measured,
+    }
+
+
 def run_recipe_write(cfg: JoltConfig, options: WriterOptions) -> dict[str, Any]:
     """Writes a recipe for the config's training set (see the module docstring); returns the report."""
     from .cli import _seed_everything
@@ -895,6 +1137,9 @@ def run_recipe_write(cfg: JoltConfig, options: WriterOptions) -> dict[str, Any]:
         return _TaskData(cfg, steps_needed)
 
     ctx, cost, data, before, probe_info = _probe(cfg, options, data_factory)
+    probe_info["n_layers"] = ctx.n_layers
+    # with the prefix cache the forward of the frozen layers below is skipped from the second epoch on
+    cost.cached_share = cached_share(cfg, data, options.tune)
     total_elements = sum(math.prod(shape) for shape in ctx.shapes)
     levels = LEVELS[: LEVELS.index(options.granularity) + 1]
     max_elements = options.budget * total_elements if options.budget > 0 else math.inf
@@ -937,6 +1182,7 @@ def run_recipe_write(cfg: JoltConfig, options: WriterOptions) -> dict[str, Any]:
         winner = max(candidates, key=lambda item: item.ratio)
         decided_by = "estimate (no trial improved the quality)" if trials else "estimate (no trials)"
     logger.info("recipe: %s chosen by %s", winner.name, decided_by)
+    tuning = _tune(cfg, winner, options, data, probe_info) if options.tune else None
 
     source = {
         "written_by": f"trener {__version__} recipe write",
@@ -956,13 +1202,16 @@ def run_recipe_write(cfg: JoltConfig, options: WriterOptions) -> dict[str, Any]:
         },
         "reference": {"estimate": reference.estimate(total_elements), "trial": reference.trial},
     }
+    if tuning is not None:
+        source["tuning"] = {key: value for key, value in tuning.items() if key not in ("model", "optim")}
     source = json.loads(json.dumps(source, default=str))  # paths and numbers as plain YAML values
     share = 100 * winner.elements / total_elements
     payload = {
         "recipe": RECIPE_FORMAT,
         "name": cfg.run.name,
         "description": f"recipe write: {winner.name}, {share:.1f}% of the candidate weights",
-        "model": winner.fields,
+        "model": {**winner.fields, **(tuning["model"] if tuning else {})},
+        **({"optim": tuning["optim"]} if tuning and tuning["optim"] else {}),
         "source": source,
     }
     save_recipe(payload, out)

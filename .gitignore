@@ -15,6 +15,7 @@ outputs/
 
 # Data / caches
 .cache/
+cache/
 /data/
 /datasets/rust-docs/.rustdoc-target/
 

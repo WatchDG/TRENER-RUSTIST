@@ -65,7 +65,8 @@ def adafactor_step(
 
     `grad` — a gradient of any real dtype (bf16 is cast to fp32 locally, as in `transformers`).
     An empty `state` is initialized. `fused=True` runs the step as one compiled function (CUDA): the result
-    equals the reference up to the rounding of the reductions, and the unused `state["RMS"]` is not updated.
+    equals the reference up to the rounding of the reductions. `state["RMS"]` (read by `transformers` only with
+    `scale_parameter=True`) is not updated.
     """
     _check_supported(beta1, relative_step, scale_parameter, warmup_init, weight_decay)
     if param.dtype != torch.float32:
@@ -102,7 +103,8 @@ def adafactor_step(
         else:
             _fused_kernel("plain")(param, grad, state["exp_avg_sq"], scalars, eps[0], clip_threshold)
         return
-    state["RMS"] = _rms(param)
+    # `transformers` also stores `RMS(param)` here, a full reduction over the parameter that only
+    # `scale_parameter=True` reads: skipped, the state keeps the key with its initial value
 
     update = (grad**2) + eps[0]
     if factored:
@@ -209,6 +211,25 @@ class FunctionalAdafactor:
                 "params": list(range(count)),
             }
         ]
+
+    def warm_up(self, shapes: Sequence[tuple[int, ...]], device: torch.device, grad_dtype: torch.dtype) -> int:
+        """Compiles the fused step for `shapes`, from the largest down; returns how many shapes were run.
+
+        The fused step is compiled with dynamic shapes, once per group of shapes its guards tell apart, with the size
+        of the first call. A training step goes from the smallest parameter up (`OptimizerHandle._step_order`), so a
+        group would be compiled for its smallest member, and the reduction over the whole update, sized for it, runs
+        as a single block over the large ones (10 ms instead of 0.5 ms for 2048 × 2048 on an RTX 4090). Running every
+        shape here, largest first, compiles each group for its largest member. The state of the runs is thrown away.
+        """
+        if not self.fused or device.type != "cuda":
+            return 0
+        distinct = sorted({tuple(int(size) for size in shape) for shape in shapes}, key=lambda s: -math.prod(s))
+        for shape in distinct:
+            param = torch.zeros(shape, dtype=torch.float32, device=device)
+            grad = torch.zeros(shape, dtype=grad_dtype, device=device)
+            adafactor_step(param, grad, {}, lr=0.0, fused=True)
+            del param, grad
+        return len(distinct)
 
     def step_param(self, index: int, param: torch.Tensor, grad: torch.Tensor) -> None:
         """Steps a single parameter by its index (`param` is an fp32 buffer)."""

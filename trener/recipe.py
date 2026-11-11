@@ -35,6 +35,9 @@ RECIPE_FIELDS: dict[str, frozenset[str] | None] = {
             "gradient_checkpointing",
             "selective_checkpointing",
             "checkpoint_free_layers",
+            "partial_backward",
+            "prefix_cache",
+            "prefix_cache_gb",
         }
     ),
     "optim": None,

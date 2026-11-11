@@ -32,7 +32,7 @@ What a recipe may set:
 
 | Section | Fields |
 |---|---|
-| `model` | `trainable`, `language_layers`, `trainable_weights`, `gradient_checkpointing`, `selective_checkpointing`, `checkpoint_free_layers` |
+| `model` | `trainable`, `language_layers`, `trainable_weights`, `gradient_checkpointing`, `selective_checkpointing`, `checkpoint_free_layers`, `partial_backward`, `prefix_cache`, `prefix_cache_gb` |
 | `optim` | every field |
 | `lora` | every field |
 
@@ -98,6 +98,7 @@ the process measures full fine-tuning. A written recipe may still carry `lora` i
 | `--false-units` | 1 | units a level may take on gradient noise alone, in expectation: the significance bar |
 | `--trials` | 4 | candidates trained to compare (0 — the estimate decides) |
 | `--trial-steps` | 20 | training steps of each trial |
+| `--no-tune` | — | do not measure the speed settings of the winner (§3.4) |
 
 ### 3.1 Probe
 
@@ -132,15 +133,17 @@ one of millions tested, needs a strong and steady signal: the `weights` level wa
 smallest tensor of the lowest layer. These fit the step-time model:
 
 ```
-t = base + per_layer·depth + per_touched·touched + per_trained·trained
+t = base + per_layer·depth + per_touched·touched + per_trained·trained − forward·(layers − depth)·cached_share
 ```
 
 | Term | Meaning |
 |---|---|
 | `depth` | decoder layers backward runs through: from the lowest trained layer up. Embeddings or a media group give the full depth. |
-| `touched` | elements of the tensors whose weight gradient backward computes. A partial tensor counts whole. |
+| `touched` | elements of the weight gradients backward computes. A whole tensor counts whole; with `model.partial_backward` the selected rows or columns of a linear layer count alone ([§7.4](07-usage/04-training.md)). Blocks and single weights count their tensor whole (an upper bound). |
 | `trained` | elements the optimizer steps, timed by an Adafactor step on the device |
 | `base` | everything else: the forward pass, the head, and the rollouts and scoring of the JOLT family |
+| `forward` | the forward of one decoder layer, estimated as `per_layer/3` (`/2` without gradient checkpointing) |
+| `cached_share` | `sft` with the prefix cache (in the config, or set by the tuning): the share of the steps after the first epoch, `(epochs − 1)/epochs`. Their rows skip the forward of the frozen layers below. |
 
 ### 3.2 Candidates
 
@@ -178,11 +181,33 @@ The winner has the most measured gain per second of training. The first step is 
 `--budget`, the reference cannot win. If no trial improves the quality, the estimate decides; the recipe's
 `source.choice.by` says so. A short trial is noisy, and JOLT accuracy especially so.
 
-### 3.4 Result
+### 3.4 Speed settings
+
+The winner's selection is loaded once more and trained a few real steps per setting (`--no-tune` skips this). Each
+value is compared with the current best in the order A B B A — a run is a warmup step and the fastest of two — and
+kept when its mean is faster and its peak reserved memory stays within 95% of the device. The pairing matters: on a
+card shared with the desktop the speed of the same setting drifted by up to 20% over minutes, more than most of
+these settings change it.
+
+1. `optim.fused_step` — off and on (CUDA only);
+2. `model.selective_checkpointing` — off and on;
+3. `model.checkpoint_free_layers` — 0, a quarter, a half and all of the layers backward runs through, in this order,
+   until one runs out of memory;
+4. `optim.master_storage` — `fp32` and `split`, four fresh loads in the order A B B A with the settings found so far
+   (Adafactor and bf16 weights only).
+
+`model.prefix_cache` is not timed: it pays from the second epoch on. It is set for `sft` when the winner leaves a
+frozen decoder layer below and the run makes more than one epoch: `ram` when the states of the corpus fit in half of
+the free host memory, otherwise `disk`. The time model already counts it (`cached_share`), so the choice of the lowest
+trained layer sees the saving.
+
+### 3.5 Result
 
 The recipe has:
 
 - `model.language_layers`, `model.trainable_weights`, and `model.trainable` on a multimodal model;
+- the speed settings of §3.4: `model.selective_checkpointing`, `model.checkpoint_free_layers`, `model.prefix_cache`,
+  `optim.master_storage`, `optim.fused_step`; `source.tuning` holds every measurement;
 - `source`: method, data and model fingerprints, `init_from`, options, quality before training, the estimate and trial
   of the winner and of the reference.
 
@@ -202,8 +227,11 @@ The report goes to `runs/<run.name>/recipe/`:
   is best after a thousand steps. The trials measure only a short horizon.
 - The probe stores the gradient sum of every candidate in fp32: about 4 bytes per weight, so ≈ 6.8 GB for
   LFM3-1.7B. The sums go on the GPU when they fit next to a training step; otherwise they go to RAM, which is slower.
-- Backward computes the whole gradient of a partial tensor. Rows and blocks save optimizer memory and master weights,
-  not backward time. The time model counts this: `touched`.
+- With `model.partial_backward` the rows and columns of a linear layer cost backward only their part. Blocks and single
+  weights are computed over the rows and columns they span, which may be the whole tensor; convolution kernels and
+  norms get the whole gradient. The time model counts this: `touched`.
+- The speed settings are measured over a few steps of the winner: the step time is noisy within a few percent, and a
+  setting that wins by less may lose in a long run.
 - `optim.lr` and the other optimizer settings are not chosen. They come from the config and can be added to the
   recipe by hand.
 - The process writes full fine-tuning recipes only.

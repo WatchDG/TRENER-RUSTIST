@@ -388,6 +388,7 @@ def cmd_recipe_write(args: argparse.Namespace) -> int:
         false_units=float(args.false_units),
         trials=int(args.trials),
         trial_steps=int(args.trial_steps),
+        tune=not args.no_tune,
     )
     result = run_recipe_write(cfg, options)
     print(f"recipe: {result['recipe']} ({result['winner']}, chosen by {result['decided_by']})")
@@ -801,6 +802,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     write.add_argument("--trials", type=int, default=4, help="candidates trained to compare (0 — the estimate decides)")
     write.add_argument("--trial-steps", type=int, default=20, help="training steps of each trial")
+    write.add_argument(
+        "--no-tune",
+        action="store_true",
+        help="do not measure the speed settings for the winner (checkpointing, fused step, master storage, "
+        "prefix cache)",
+    )
     write.set_defaults(func=cmd_recipe_write)
 
     bench = sub.add_parser("bench", help="model benchmarks: measure, compare reports (docs/11-benchmarks.md)")

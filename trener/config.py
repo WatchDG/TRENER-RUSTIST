@@ -44,6 +44,8 @@ STUDENT_REWARD_METHODS = ("jolt+", "grpo")
 OPTIMIZERS = ("adafactor", "adamw8bit")
 SCHEDULES = ("constant", "linear", "cosine")
 DTYPES = ("bfloat16", "float16", "float32")
+#: Modes of `model.prefix_cache` (`trener.prefix_cache`).
+PREFIX_CACHE_MODES = ("none", "ram", "disk")
 SPLITS = ("train", "test")
 PRIVILEGED_TYPES = ("reference_answer",)
 
@@ -159,6 +161,17 @@ class ModelConfig:
     #: (`[row, column, width, height]`); selections are united, overlaps allowed; without them — the whole tensor.
     #: Parameters no rule names are frozen; the master and the optimizer state cover only the selected elements.
     trainable_weights: list[dict[str, Any]] = field(default_factory=list)
+    #: The linear layers of partial weights (`trainable_weights`) compute the gradient of their selected part only,
+    #: not of the whole weight (`trener.partial`); false — the full gradient, from which the part is taken.
+    partial_backward: bool = True
+    #: Cache of the hidden states at the lowest trained decoder layer (`trener.prefix_cache`, `sft` only): `none`,
+    #: `ram` (host memory of this process) or `disk` (`prefix_cache_dir`, shared by runs over the same frozen layers).
+    #: A cached document skips the forward of the frozen layers below; it is filled in the first epoch.
+    prefix_cache: str = "none"
+    #: Host memory of `prefix_cache: ram`, GiB (0 — no limit): documents past it are not cached.
+    prefix_cache_gb: float = 0.0
+    #: Directory of `prefix_cache: disk`; one subdirectory per frozen prefix (its weights, depth and kernels).
+    prefix_cache_dir: Path = Path("cache/prefix")
     #: Token budget of one image of a vision-language model (one token — 32×32 pixels, `trener.vision`): the image
     #: is resized so that its token count lies within `[image_min_tokens, image_max_tokens]`.
     image_min_tokens: int = 64
@@ -183,6 +196,10 @@ class ModelConfig:
             "trainable": list(self.trainable),
             "language_layers": list(self.language_layers),
             "trainable_weights": copy.deepcopy(self.trainable_weights),
+            "partial_backward": self.partial_backward,
+            "prefix_cache": self.prefix_cache,
+            "prefix_cache_gb": self.prefix_cache_gb,
+            "prefix_cache_dir": str(self.prefix_cache_dir),
             "image_min_tokens": self.image_min_tokens,
             "image_max_tokens": self.image_max_tokens,
             "audio_max_seconds": self.audio_max_seconds,
@@ -746,6 +763,16 @@ def validate_config(cfg: JoltConfig) -> JoltConfig:
         raise ConfigError(f"model.audio_max_seconds must be > 0, got {cfg.model.audio_max_seconds}")
     if not math.isfinite(cfg.model.media_cache_gb) or cfg.model.media_cache_gb <= 0:
         raise ConfigError(f"model.media_cache_gb must be > 0, got {cfg.model.media_cache_gb}")
+    if cfg.model.prefix_cache not in PREFIX_CACHE_MODES:
+        raise ConfigError(
+            f"model.prefix_cache={cfg.model.prefix_cache!r} is not allowed; allowed values: {list(PREFIX_CACHE_MODES)}"
+        )
+    if not math.isfinite(cfg.model.prefix_cache_gb) or cfg.model.prefix_cache_gb < 0:
+        raise ConfigError(f"model.prefix_cache_gb must be ≥ 0 (0 — no limit), got {cfg.model.prefix_cache_gb}")
+    if cfg.model.prefix_cache != "none" and cfg.method != SFT_METHOD:
+        raise ConfigError(
+            f"model.prefix_cache is for method sft (its documents repeat every epoch), got method {cfg.method!r}"
+        )
     for key in ("vision_lr_scale", "projector_lr_scale", "audio_lr_scale", "voice_lr_scale"):
         value = getattr(cfg.optim, key)
         if not math.isfinite(value) or value <= 0:

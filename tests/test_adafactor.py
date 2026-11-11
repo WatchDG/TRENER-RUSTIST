@@ -49,7 +49,7 @@ def test_matches_transformers_adafactor_bitwise(shape: tuple[int, ...], device: 
     assert set(state) == set(expected)
     assert state["step"] == expected["step"] == 5
     for key, value in expected.items():
-        if isinstance(value, torch.Tensor):
+        if isinstance(value, torch.Tensor) and key != "RMS":  # read only with `scale_parameter=True`: not tracked
             assert state[key].shape == value.shape
             assert torch.equal(state[key], value), key
 
@@ -75,7 +75,9 @@ def test_functional_state_dict_matches_optimizer_format(device: str) -> None:
     assert actual["param_groups"][0]["params"] == expected["param_groups"][0]["params"]
     for index in expected["state"]:
         for key, value in expected["state"][index].items():
-            if isinstance(value, torch.Tensor):
+            if key == "RMS":  # read only with `scale_parameter=True`: the port does not track it
+                assert key in actual["state"][index]
+            elif isinstance(value, torch.Tensor):
                 assert torch.equal(actual["state"][index][key], value)
             else:
                 assert actual["state"][index][key] == value

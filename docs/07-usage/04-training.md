@@ -42,7 +42,8 @@ model:
 Items may overlap. Everything of the language model that is not selected is frozen: it gets no fp32 master and no
 optimizer state, the gradient still flows through it to the trained layers below. Backward stops at the lowest
 trained layer: frozen layers under it cost only their forward pass (with `embeddings` selected, backward runs through
-every layer). With LoRA
+every layer). In `sft` that forward is cached too with `model.prefix_cache` (below): from the second epoch a
+document enters at the lowest trained layer. With LoRA
 ([09-lora.md](../09-lora.md)) only the linear layers of the selected layers get adapters, and `embeddings`/`norm` are
 an error. Other module groups of a multimodal model are set by `model.trainable` / `lora.modules` as before; the
 `language` group must be among them. The syntax is checked when the config loads; a layer out of range or a type
@@ -83,8 +84,12 @@ columns only, one block, rows × columns) the part is a matrix and Adafactor fac
 separate matrix; any other mix (rows and columns together, single weights, several blocks) trains as the list of its
 elements with a per-element second moment. The gradient norm (`optim.max_grad_norm`) counts the selected elements
 only; `n_trainable_parameters` in `env.txt` is their number, `trainable_weights` — the counts of partial tensors and
-their elements. Backward still computes the full gradient of a partial tensor: the selection saves optimizer memory
-and the master, not backward time. Overrides take YAML flow syntax:
+their elements. With `model.partial_backward: true` (the default) a linear layer of a decoder layer computes the weight
+gradient of its selected part only (`trener/partial.py`): rows — `dY[:, rows]ᵀ·X`, columns — `dYᵀ·X[:, cols]`, a
+scattered selection — the product over the rows and columns it spans, then its elements. The full-size gradient of
+the weight is never formed, and the GEMM shrinks with the selection; `env.txt` counts the patched layers
+(`partial_backward`). A part spanning more than half of its weight (its rows × its columns), convolution kernels,
+norms, tied embeddings and the LM head keep the full gradient, from which the part is taken. Overrides take YAML flow syntax:
 `--set 'model.trainable_weights=[{params: "*.q_proj.weight", rows: [0-63]}]'`.
 
 The run directory by default is `runs/<run.name>/` (`run.out_dir` in the config).
@@ -133,8 +138,12 @@ Performance parameters (they do not affect the step's math):
 | `run.pinned_checkpoint` | `false` | the checkpoint snapshot is copied into pinned buffers asynchronously (the main thread does not wait for the copy into ordinary memory); bit-for-bit the same checkpoint |
 | `model.selective_checkpointing` | `false` | selective checkpointing: during recomputation in backward, `matmul` and SDPA are not repeated, only element-wise operations; requires `gradient_checkpointing: true` |
 | `model.checkpoint_free_layers` | `0` | the last N decoder layers are not recomputed in backward (faster, more VRAM; requires `gradient_checkpointing: true`, [§7.13](13-speedups.md)) |
+| `model.partial_backward` | `true` | a linear layer of a partial weight (`trainable_weights`) computes the gradient of its selected part only (above); `false` — the full gradient, from which the part is taken |
+| `model.prefix_cache` | `none` | `sft` only: cache of the input of the lowest trained decoder layer per document (`trener/prefix_cache.py`). `ram` — host memory of the process, `disk` — `prefix_cache_dir`, shared by runs over the same frozen weights. Filled in the first epoch; a row whose documents are all cached skips the forward of the frozen layers. The first cached row is checked against the whole forward; a mismatch turns the cache off with a warning. Needs a frozen decoder layer below the trained ones and frozen embeddings; documents with media are not cached. `metrics.jsonl`: `prefix_cached_rows` ([§7.13](13-speedups.md)) |
+| `model.prefix_cache_gb` | `0` | host memory of `prefix_cache: ram`, GiB (0 — no limit): documents past it are not cached |
+| `model.prefix_cache_dir` | `cache/prefix` | directory of `prefix_cache: disk`: a subdirectory per key (checksum of the frozen weights, the depth, the model config, dtype and kernels) with `data.bin` and `index.json`; ≈ `hidden × 2` bytes per token (4 KB for LFM3-1.7B) |
 | `model.media_cache_gb` | `3.0` | host memory of the cache of prepared images and log-mel features of each media encoder, GiB ([§7.13](13-speedups.md)) |
-| `optim.fused_step` | `false` | Adafactor step as one compiled function per parameter (CUDA): equal to the reference up to rounding, not bitwise ([§7.13](13-speedups.md)) |
+| `optim.fused_step` | `false` | Adafactor step as one compiled function per parameter (CUDA): equal to the reference up to rounding, not bitwise; compiled when the optimizer is built, for the master shapes from the largest down ([§7.13](13-speedups.md)) |
 | `optim.master_storage` | `fp32` | `fp32` — a separate fp32 master; `split` — bf16 model weights + `int16` low halves (the same fp32 master bit-for-bit, −3.2 GB VRAM); only `adafactor` ([§7.9](09-memory.md)) |
 | `optim.master_offload` | `false` | economy mode: low halves of the master in pinned RAM, the optimizer step streamed through the GPU; requires `master_storage: split` and CUDA ([§7.9](09-memory.md)) |
 

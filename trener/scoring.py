@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
+from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -45,6 +46,7 @@ from torch.utils.checkpoint import checkpoint
 from .attention import DOCUMENTS_KWARG
 from .head import fused_head_applies, fused_logprobs
 from .media import Media, has_media, media_embeds
+from .prefix_cache import document_key
 from .speech import frame_losses
 
 if TYPE_CHECKING:  # pragma: no cover - for type checking only
@@ -430,6 +432,27 @@ def score_sequences(
     return results
 
 
+def _verify_cache(
+    cache: Any,
+    base: Any,
+    input_ids: torch.Tensor,
+    cached: torch.Tensor,
+    positions: torch.Tensor,
+    documents: tuple[int, ...],
+) -> bool:
+    """`PrefixCache.verify` on a row: the whole forward against the forward from the cached states."""
+    kwargs = {"position_ids": positions, "use_cache": False, DOCUMENTS_KWARG: documents}
+
+    def whole() -> torch.Tensor:
+        return base(input_ids=input_ids, **kwargs).last_hidden_state
+
+    def from_cache() -> torch.Tensor:
+        with cache.skipping():
+            return base(inputs_embeds=cached, **kwargs).last_hidden_state
+
+    return cache.verify(whole, from_cache)
+
+
 def _score_packed(
     policy: Policy,
     items: Sequence[tuple[Sequence[int], Sequence[int]]],
@@ -487,13 +510,32 @@ def _score_packed(
         column_index = _long_tensor(columns, device)
         targets = _long_tensor(target_ids, device)
         documents = tuple(len(items[index][0]) + len(items[index][1]) for index in members)
+        row_media = [media[index] for index in members] if media is not None else []
+        cache = policy.prefix_cache if not has_media(row_media) else None
+        keys = [document_key(*items[index]) for index in members] if cache is not None else []
+        cached = cache.row_input(keys, device) if cache is not None else None
+        if (
+            cached is not None
+            and not cache.verified
+            and not _verify_cache(cache, base, input_ids, cached, positions, documents)
+        ):
+            cached = None
         context = torch.enable_grad() if grad else torch.no_grad()
         with context:
             # no `attention_mask`: restarting `position_ids` isolates the documents of the row;
             # document lengths are for per-document attention (`trener.attention`)
-            row_media = [media[index] for index in members] if media is not None else []
-            inputs = _model_inputs(policy, input_ids, row_media)
-            outputs = base(**inputs, position_ids=positions, use_cache=False, **{DOCUMENTS_KWARG: documents})
+            if cached is not None:  # the frozen layers below the cached one are not run (`trener.prefix_cache`)
+                assert cache is not None
+                cache.hits += 1
+                with cache.skipping():
+                    outputs = base(
+                        inputs_embeds=cached, position_ids=positions, use_cache=False, **{DOCUMENTS_KWARG: documents}
+                    )
+            else:
+                inputs = _model_inputs(policy, input_ids, row_media)
+                taking = cache.capture(keys, documents) if cache is not None else nullcontext()
+                with taking:
+                    outputs = base(**inputs, position_ids=positions, use_cache=False, **{DOCUMENTS_KWARG: documents})
             hidden_states = outputs.last_hidden_state[0]
             if speech is not None and frames:
                 _score_speech(

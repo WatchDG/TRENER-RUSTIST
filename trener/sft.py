@@ -29,6 +29,7 @@ from .config import UNSET_PATH, JoltConfig
 from .corpus import Document, SftPlan, corpus_fingerprint, load_corpora, load_corpus, tokenize_records
 from .losses import policy_gradient_loss
 from .media import MediaEncoder
+from .prefix_cache import attach_prefix_cache
 from .scoring import SpeechLosses, score_sequences
 from .trainer import Trainer, _peak_memory_gb, _peak_reserved_gb, _PhaseClock, _ratio, _synchronize
 
@@ -61,6 +62,8 @@ class SftMetrics:
     #: Breakdown of the step (only with `run.profile=true`): backward passes and the optimizer, seconds.
     forward_backward_time_s: float | None = None
     optimizer_time_s: float | None = None
+    #: Rows of the step that started from the cached states of the frozen layers (`model.prefix_cache`).
+    prefix_cached_rows: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -86,11 +89,18 @@ class SftMetrics:
                 )
                 if value is not None
             },
+            **({"prefix_cached_rows": self.prefix_cached_rows} if self.prefix_cached_rows is not None else {}),
         }
 
 
 class SftTrainer(Trainer):
     """`sft` step on top of the shared trainer: the same optimizer, checkpoints, and resume."""
+
+    def __init__(self, cfg: JoltConfig, policy: Policy, artifacts: Any, optimizer: Any = None) -> None:
+        super().__init__(cfg, policy, artifacts, optimizer=optimizer)
+        # the documents repeat every epoch: the output of the frozen layers is cached (`model.prefix_cache`);
+        # its key is computed on first use, after `init_from`/`resume` have loaded the weights
+        attach_prefix_cache(cfg, policy)
 
     def sft_step(self, rows: Sequence[Sequence[Document]]) -> SftMetrics:
         """One step: backward over the rows with gradient accumulation, then one update of the shared parameters."""
@@ -106,6 +116,8 @@ class SftTrainer(Trainer):
             raise RuntimeError("sft step without loss tokens")
         max_tokens = int(self.cfg.sft.max_tokens)
         processed = 0
+        cache = self.policy.prefix_cache
+        hits_before = cache.hits if cache is not None else 0
         generator = _speech_generator(self.policy, int(self.cfg.run.seed), self.step_index) if n_frames else None
 
         self.optimizer.zero_grad()
@@ -146,12 +158,15 @@ class SftTrainer(Trainer):
 
         self._wait_snapshot_copy()
         self._release_cache()
-        grad_norm = self.optimizer.clip_grad_norm(float(self.cfg.optim.max_grad_norm))
-        lr = self.optimizer.scheduler_step(self.step_index)
-        with optimizer_clock.measure():
+        with optimizer_clock.measure():  # clipping, the schedule and the step, as in `Trainer.step`
+            grad_norm = self.optimizer.clip_grad_norm(float(self.cfg.optim.max_grad_norm))
+            lr = self.optimizer.scheduler_step(self.step_index)
             self.optimizer.step()
         self._release_cache()
         _synchronize()
+        cache = self.policy.prefix_cache
+        if cache is not None:
+            cache.flush()  # the states taken in this step: device → host memory or disk
         loss_value = float(loss_sum) if loss_sum is not None else 0.0
         speech_sum = float(speech_total) if speech_total is not None else 0.0
         elapsed = time.perf_counter() - started
@@ -173,6 +188,7 @@ class SftTrainer(Trainer):
             speech_loss=speech_sum / n_frames if n_frames else 0.0,
             forward_backward_time_s=row_clock.seconds(),
             optimizer_time_s=optimizer_clock.seconds(),
+            prefix_cached_rows=cache.hits - hits_before if cache is not None else None,
         )
 
 
@@ -211,6 +227,8 @@ def evaluate_nll(policy: Policy, documents: Sequence[Document], max_tokens: int)
         speech=speech,
         **_document_kwargs(documents),
     )
+    if policy.prefix_cache is not None:
+        policy.prefix_cache.flush()
     per_item: dict[str, list[float]] = {}
     total = 0.0
     tokens = 0
