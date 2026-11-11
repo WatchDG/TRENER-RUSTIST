@@ -1,0 +1,60 @@
+{
+  "format": "jolt-tasks",
+  "format_version": 1,
+  "name": "rust-cargo-uuid-mc-0001",
+  "description": "Multiple-choice knowledge of uuid 1.29.2 (92 tasks) from run 20261111-135925-rust-crate-knowledge-uuid-1.29.2",
+  "source": "F:\\git\\wdg\\HARNESS-TRENERIST\\runs\\20261111-135925-rust-crate-knowledge-uuid-1.29.2",
+  "default_answer_type": "choice",
+  "mode": "qa",
+  "splits": {
+    "test": {
+      "files": [
+        {
+          "file": "test.concept_explain.jsonl",
+          "records": 14,
+          "sha256": "a74b8e4641f9595ee63aa5e8f07655e2dfdbd9ad0d052c1c87ed056f892d5fdd"
+        },
+        {
+          "file": "test.error_diagnosis.jsonl",
+          "records": 7,
+          "sha256": "e53900fc838b53cb93b5de25b2d9fdddc4d3995eea38267ab178e5a61216d797"
+        },
+        {
+          "file": "test.existence_check.jsonl",
+          "records": 8,
+          "sha256": "72c75e184bee5c0c6b90f5103adc107f4794264b5e639c2d0d7a35c46c3b50c0"
+        },
+        {
+          "file": "test.feature_gate.jsonl",
+          "records": 3,
+          "sha256": "136786d84a9783eee068d28ceaf813d2778c3ca4f1fd56ca7860542e05b4a3b2"
+        },
+        {
+          "file": "test.feature_purpose.jsonl",
+          "records": 1,
+          "sha256": "298c6f45d74986fa169a5970bd0d6870a3ebf291b8b8c20e7b457e0984c6c7f1"
+        },
+        {
+          "file": "test.feature_trap.jsonl",
+          "records": 2,
+          "sha256": "c80441282b7a7d19cbdba467e0e514a8b5c9aee36eb6db1e352fcb731e96e807"
+        },
+        {
+          "file": "test.recall_by_name.jsonl",
+          "records": 28,
+          "sha256": "8fcd621167be0fc6fe1ba24e814dea25546984deda2826476908b75a9c9ba87e"
+        },
+        {
+          "file": "test.signature_completion.jsonl",
+          "records": 8,
+          "sha256": "8e0e0ca45cbe480b1938f894394356eeb2657073817449b63929c6fd248202e8"
+        },
+        {
+          "file": "test.usage_task.jsonl",
+          "records": 21,
+          "sha256": "c9ba1ae3818b79f7c22471d5653558ab8abe8a5bb954b5fb85ae92a55f72638c"
+        }
+      ]
+    }
+  }
+}
