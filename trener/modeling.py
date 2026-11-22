@@ -2,7 +2,7 @@
 
 The model is loaded in bf16 on CUDA as its architecture prescribes (`trener.architectures`, by `architectures` of the
 model's `config.json`): LFM3 by the checkpoint's code (`trust_remote_code=True`), Spark2_5 by the pipeline's own
-implementation, Llama (MiniCPM5) by `transformers`, LFM3-VL by the checkpoint's code through
+implementation, Llama (MiniCPM5) and Gemma 4 by `transformers`, LFM3-VL by the checkpoint's code through
 `AutoModelForImageTextToText`, SenseNova-Loop by the checkpoint's code through `AutoModelForCausalLM`;
 a vision-language model also gets its image encoder (`trener.vision`). The tokenizer
 is loaded with the end of an assistant turn as EOS (`trener.chat_format.load_tokenizer`). `model.trainable` freezes

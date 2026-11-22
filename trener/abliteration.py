@@ -121,7 +121,9 @@ def find_targets(model: Any) -> list[AblationTarget]:
             else:
                 raise RuntimeError(f"layer {index}: no {component} output projection among {list(paths)}")
             post_norm = architecture.post_norms.get(component)
-            sandwich = post_norm is not None and getattr(layer, "use_sandwich_norm", False)
+            sandwich = post_norm is not None and (
+                architecture.post_norms_always or getattr(layer, "use_sandwich_norm", False)
+            )
             norm = getattr(layer, post_norm, None) if sandwich else None
             gain = norm.weight.detach() if norm is not None else None
             targets.append(AblationTarget(index, component, f"layers.{index}.{path}", module, gain))

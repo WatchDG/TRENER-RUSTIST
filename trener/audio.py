@@ -85,13 +85,19 @@ def load_clip(path: str | Path, rate: int) -> torch.Tensor:
 
 @dataclass(frozen=True)
 class AudioRef:
-    """One audio clip of a prompt: its file, spectrogram frames and audio tokens."""
+    """One audio clip of a prompt: its file, spectrogram frames and audio tokens.
+
+    `tokens` — the language tokens of the clip when they are not `ceil(frames / 8)` (Gemma 4: one token per 40 ms).
+    """
 
     path: str
     frames: int
+    tokens: int | None = None
 
     @property
     def n_tokens(self) -> int:
+        if self.tokens is not None:
+            return int(self.tokens)
         return -(self.frames // -FRAMES_PER_TOKEN)
 
 

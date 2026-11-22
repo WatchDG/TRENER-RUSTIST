@@ -36,6 +36,28 @@ the checkpoint has no code):
 .venv\Scripts\python.exe -c "from huggingface_hub import snapshot_download; snapshot_download('openbmb/MiniCPM5-2B', local_dir='models/MiniCPM5-2B')"
 ```
 
+Gemma 4 E2B goes to `models/Gemma-4-E2B-it` ([google/gemma-4-E2B-it](https://huggingface.co/google/gemma-4-E2B-it));
+`configs/smoke_sft_gemma4.yaml` and `configs/smoke_abliterate_gemma4.yaml` are the smoke presets, and any other config
+runs on it with `--set model.path=models/Gemma-4-E2B-it`. The weights are about 10 GB in bf16 (the 262 144-token
+embedding and the per-layer embedding table). `model.trust_remote_code` is not needed. Images use the checkpoint's
+soft-token budget (280 unless `model.image_max_tokens` is 70, 140, 280, 560 or 1120); audio is one token per 40 ms.
+Video is not supported. The prefix cache does not resume this model.
+
+```powershell
+.venv\Scripts\python.exe -c "from huggingface_hub import snapshot_download; snapshot_download('google/gemma-4-E2B-it', local_dir='models/Gemma-4-E2B-it')"
+```
+
+Gemma 4 E4B goes to `models/Gemma-4-E4B-it` ([google/gemma-4-E4B-it](https://huggingface.co/google/gemma-4-E4B-it)) and
+uses the same architecture (`Gemma4ForConditionalGeneration`). `configs/smoke_sft_gemma4_e4b.yaml` and
+`configs/smoke_abliterate_gemma4_e4b.yaml` are the smoke presets; any other config runs on it with
+`--set model.path=models/Gemma-4-E4B-it`. The weights are about 15 GB in bf16. The language model has 42 layers
+(the smoke preset trains `40-41`); `use_double_wide_mlp` is off, so the MLP stays at `intermediate_size`. Images,
+audio, video and the prefix cache are the same as E2B.
+
+```powershell
+.venv\Scripts\python.exe -c "from huggingface_hub import snapshot_download; snapshot_download('google/gemma-4-E4B-it', local_dir='models/Gemma-4-E4B-it')"
+```
+
 LFM3-VL-2B goes to `models/LFM3-VL-2B`; its tasks and corpus records may carry images, and the vision tower and the
 projector train together with the language model ([12-vision.md](../12-vision.md)). The smoke presets
 `configs/smoke_lfm3_vl_rust_code_jolt.yaml` (JOLT) and `configs/smoke_sft_lfm3_vl.yaml` (`sft`) run on the image set
@@ -60,6 +82,7 @@ model's `config.json`, not by its name or path; each architecture is described i
 | `Lfm3OmniForConditionalGeneration` (LFM3-Omni) | `lfm3_omni.py` | the checkpoint's code through `AutoModelForImageTextToText`; module groups `language`, `vision`, `projector`, `audio`, `voice`; a text answer never samples the switches to speech, `<\|text_end\|>` ends it | those of LFM3 in `model.language_model.layers` |
 | `Lfm3VlForConditionalGeneration` (LFM3-VL) | `lfm3_vl.py` | the checkpoint's code through `AutoModelForImageTextToText` (`model.trust_remote_code: true`); module groups `language`, `vision`, `projector` | those of LFM3 in `model.language_model.layers`; the vision tower is not touched |
 | `LlamaForCausalLM` (MiniCPM5) | `llama.py` | `transformers` (`AutoModelForCausalLM`, `model_type: llama`); the checkpoint has no code | `self_attn.o_proj`, `mlp.down_proj` |
+| `Gemma4ForConditionalGeneration` (Gemma 4) | `gemma4.py` | `transformers` (`AutoModelForCausalLM`, `model_type: gemma4`); module groups `language`, `vision`, `projector`, `audio`; the last `num_kv_shared_layers` keep their own key and value projections for a forward without a cache | `self_attn.o_proj`, `mlp.down_proj`, with `post_attention_layernorm` and `post_feedforward_layernorm` |
 | any other | — | `AutoModelForCausalLM` | `self_attn.o_proj`, `mlp.down_proj` |
 
 The Spark checkpoint's code (`modeling_spark.py`) does not load in transformers 5 and does not fit the pipeline:

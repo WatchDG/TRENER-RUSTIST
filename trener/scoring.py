@@ -102,6 +102,7 @@ def _chunk_logprobs(
     lm_head: Any,
     use_checkpoint: bool,
     bias: torch.Tensor | None = None,
+    cap: float | None = None,
 ) -> torch.Tensor:
     """Log-probabilities of the target tokens for a chunk of positions."""
     if use_checkpoint:
@@ -111,16 +112,24 @@ def _chunk_logprobs(
             targets,
             lm_head,
             bias,
+            cap,
             use_reentrant=False,
         )
-    return _chunk_logprobs_impl(hidden, targets, lm_head, bias)
+    return _chunk_logprobs_impl(hidden, targets, lm_head, bias, cap)
 
 
 def _chunk_logprobs_impl(
-    hidden: torch.Tensor, targets: torch.Tensor, lm_head: Any, bias: torch.Tensor | None = None
+    hidden: torch.Tensor,
+    targets: torch.Tensor,
+    lm_head: Any,
+    bias: torch.Tensor | None = None,
+    cap: float | None = None,
 ) -> torch.Tensor:
-    # log_softmax(x)[y] = x[y] − logsumexp(x): the full log_softmax tensor is not needed
+    # log_softmax(x)[y] = x[y] − logsumexp(x): the full log_softmax tensor is not needed.
+    # `cap` is the model's final-logit soft cap (`cap · tanh(x / cap)`), applied before the bias, as in its forward.
     logits = lm_head(hidden).float()
+    if cap is not None:
+        logits = cap * torch.tanh(logits / cap)
     if bias is not None:
         logits = logits + bias
     return logits.gather(-1, targets.unsqueeze(-1)).squeeze(-1) - torch.logsumexp(logits, dim=-1)
@@ -134,16 +143,22 @@ def _flat_logprobs(
     grad: bool,
     bias: torch.Tensor | None = None,
     fused: bool = False,
+    cap: float | None = None,
 ) -> torch.Tensor:
     """Log-probabilities of the targets over a flat list of positions (`lm_head` in chunks).
 
     `fused` — the fused head (`trener.head`) where it applies: with gradient, without `bias`, on CUDA.
     """
-    if fused and grad and bias is None and fused_head_applies(hidden, lm_head):
+    if cap is None and fused and grad and bias is None and fused_head_applies(hidden, lm_head):
         return fused_logprobs(hidden, targets, lm_head, chunk)
     pieces = [
         _chunk_logprobs(
-            hidden[offset : offset + chunk], targets[offset : offset + chunk], lm_head, use_checkpoint=grad, bias=bias
+            hidden[offset : offset + chunk],
+            targets[offset : offset + chunk],
+            lm_head,
+            use_checkpoint=grad,
+            bias=bias,
+            cap=cap,
         )
         for offset in range(0, targets.shape[0], chunk)
     ]
@@ -363,9 +378,10 @@ def score_sequences(
     entries: Sequence[Media | None] = media if media is not None else [None] * len(items)
     lm_head = policy.model.lm_head
     bias = policy.text_bias(int(lm_head.weight.shape[0])) if text_mode else None
+    cap = _logit_cap(policy)
     if max_tokens > 0:
         return _score_packed(
-            policy, items, grad, int(max_tokens), groups, stats, masks, entries, bias, speech, fused_head
+            policy, items, grad, int(max_tokens), groups, stats, masks, entries, bias, speech, fused_head, cap
         )
 
     device = policy.device
@@ -437,7 +453,7 @@ def score_sequences(
                 targets = torch.tensor(target_ids, dtype=torch.long, device=device)
                 # completion positions of the whole micro-batch as one flat tensor
                 hidden = hidden_states[row_index, column_index]
-                flat = _flat_logprobs(hidden, targets, lm_head, chunk, grad, bias, fused_head)
+                flat = _flat_logprobs(hidden, targets, lm_head, chunk, grad, bias, fused_head, cap)
                 values = list((flat if grad else flat.detach()).split(completion_lengths))
             else:
                 values = [torch.zeros(0, dtype=torch.float32, device=device) for _ in batch]
@@ -467,6 +483,12 @@ def _verify_cache(
     return cache.verify(whole, from_cache)
 
 
+def _logit_cap(policy: Policy) -> float | None:
+    """Final-logit soft cap of the model (`Architecture.logit_softcap`); `None` — the head is linear."""
+    fn = architecture_of(policy.model).logit_softcap
+    return None if fn is None else fn(policy.model.config)
+
+
 def _score_packed(
     policy: Policy,
     items: Sequence[tuple[Sequence[int], Sequence[int]]],
@@ -479,6 +501,7 @@ def _score_packed(
     bias: torch.Tensor | None = None,
     speech: SpeechLosses | None = None,
     fused_head: bool = False,
+    cap: float | None = None,
 ) -> list[torch.Tensor]:
     """Packed scoring: one forward pass over one row of sequences from a single group."""
     device = policy.device
@@ -568,7 +591,7 @@ def _score_packed(
                     grad,
                 )
             if target_ids:
-                flat = _flat_logprobs(hidden_states[column_index], targets, lm_head, chunk, grad, bias, fused_head)
+                flat = _flat_logprobs(hidden_states[column_index], targets, lm_head, chunk, grad, bias, fused_head, cap)
                 values = list((flat if grad else flat.detach()).split(completion_lengths))
             else:
                 values = [torch.zeros(0, dtype=torch.float32, device=device) for _ in members]

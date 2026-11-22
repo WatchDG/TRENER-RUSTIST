@@ -73,8 +73,13 @@ def user_content(question: str, n_images: int = 0, n_audio: int = 0) -> str | li
     return parts
 
 
-def _repeat(ids: Sequence[int], token: int, counts: Sequence[int], what: str) -> list[int]:
-    """Replaces the `k`-th single `token` of `ids` with `counts[k]` copies."""
+def _repeat(
+    ids: Sequence[int], token: int, counts: Sequence[int], what: str, span: Callable[[int], list[int]] | None = None
+) -> list[int]:
+    """Replaces the `k`-th single `token` of `ids` with `counts[k]` copies.
+
+    `span` builds another sequence of that length (Gemma 4 wraps soft tokens in begin and end tokens).
+    """
     found = sum(1 for value in ids if value == token)
     if found != len(counts):
         raise ValueError(f"the sequence has {found} {what} placeholder(s), its media have {len(counts)}")
@@ -82,7 +87,8 @@ def _repeat(ids: Sequence[int], token: int, counts: Sequence[int], what: str) ->
     remaining = iter(counts)
     for value in ids:
         if value == token:
-            expanded.extend([token] * next(remaining))
+            count = int(next(remaining))
+            expanded.extend([token] * count if span is None else span(count))
         else:
             expanded.append(int(value))
     return expanded
@@ -138,12 +144,21 @@ class MediaEncoder:
         result = list(ids)
         if media is None:
             return result
+        placeholder = self.architecture.placeholder
+
+        def span(kind: str) -> Callable[[int], list[int]] | None:
+            if placeholder is None:
+                return None
+            return lambda count: placeholder(self, kind, count)
+
         if media.images:
             assert self.image_token_id is not None
-            result = _repeat(result, self.image_token_id, [ref.n_tokens for ref in media.images], "image")
+            result = _repeat(
+                result, self.image_token_id, [ref.n_tokens for ref in media.images], "image", span("image")
+            )
         if media.audio:
             assert self.audio_token_id is not None
-            result = _repeat(result, self.audio_token_id, [ref.n_tokens for ref in media.audio], "audio")
+            result = _repeat(result, self.audio_token_id, [ref.n_tokens for ref in media.audio], "audio", span("audio"))
         if media.frames:
             assert self.audio_out_token_id is not None
             result = _repeat(result, self.audio_out_token_id, [media.frames], "speech")
@@ -173,7 +188,7 @@ def load_media_encoder(
     images = audio = None
     cache = {} if cache_gb is None else {"cache_bytes": int(cache_gb * (1 << 30))}
     if architecture.vision:
-        images = ImageEncoder(
+        images = (architecture.build_images or ImageEncoder)(
             processor.image_processor,
             image_token_id=int(config["image_token_id"]),
             min_tokens=image_min_tokens,
@@ -181,14 +196,16 @@ def load_media_encoder(
             **cache,
         )
     if architecture.hearing:
-        audio = AudioEncoder(
-            processor.feature_extractor,
+        audio_kwargs = dict(
             audio_token_id=int(config["audio_token_id"]),
             max_seconds=audio_max_seconds,
             **cache,
         )
+        if architecture.build_audio is not None:
+            audio_kwargs["audio_seq_length"] = int(getattr(processor, "audio_seq_length", 750))
+        audio = (architecture.build_audio or AudioEncoder)(processor.feature_extractor, **audio_kwargs)
     codec = load_codec(model_path, processor) if architecture.speaking else None
-    return MediaEncoder(
+    encoder = MediaEncoder(
         architecture,
         images=images,
         audio=audio,
@@ -198,6 +215,9 @@ def load_media_encoder(
         audio_out_token_id=config.get("audio_out_token_id"),
         audio_start_token_id=config.get("audio_start_token_id"),
     )
+    for name in ("boi_token_id", "eoi_token_id", "boa_token_id", "eoa_token_id"):
+        setattr(encoder, name, config.get(name))
+    return encoder
 
 
 _TRAINABLE: weakref.WeakKeyDictionary[Any, dict[tuple[str, ...], bool]] = weakref.WeakKeyDictionary()

@@ -271,7 +271,8 @@ runs/<name>/
   wrongly. Use it for research, not for medical decisions without expert review.
 - The projections and post-norms come from the model's architecture (`trener.architectures`): LFM3 (`conv.out_proj`
   or `self_attn.o_proj`, `feed_forward.w2`, the post-norms `post_operator_norm`, `post_ffn_norm` with the γ
-  correction of §3.3), Spark2_5 (`self_attn.out_proj`, `mlp.down_proj`, no post-norm), Llama — MiniCPM5 — and any
+  correction of §3.3), Spark2_5 (`self_attn.out_proj`, `mlp.down_proj`, no post-norm), Gemma 4 (`self_attn.o_proj`,
+`mlp.down_proj`, post-norms `post_attention_layernorm` and `post_feedforward_layernorm`), Llama — MiniCPM5 — and any
   other architecture (`self_attn.o_proj`, `mlp.down_proj`, no post-norm).
 - KL is measured on the first token of the `good` prompts only (§4.2).
 - `lora.enabled: true` is rejected; `speed` does not measure `abliterate` (time per trial is `trial_s` in

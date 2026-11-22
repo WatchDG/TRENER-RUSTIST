@@ -73,6 +73,7 @@ def _model_dir(tmp_path: Path, architectures: Any) -> Path:
         (["SomethingElse", "Spark2_5ForCausalLM"], "Spark2_5ForCausalLM"),
         (["LlamaForCausalLM"], "LlamaForCausalLM"),
         (["SenseNovaLoopForConditionalGeneration"], "SenseNovaLoopForConditionalGeneration"),
+        (["Gemma4ForConditionalGeneration"], "Gemma4ForConditionalGeneration"),
         (["SomethingElse"], None),
         (None, None),
     ],

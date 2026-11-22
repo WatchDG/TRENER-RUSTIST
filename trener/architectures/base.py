@@ -199,6 +199,21 @@ class Architecture:
     #: `(model, hidden) -> hidden` in the width the output projections write (`mean_residuals`); `None` — the
     #: layer output is already that width.
     residual: Callable[..., torch.Tensor] | None = None
+    #: Language-model modules trained together with the token embeddings (`model.language_layers: [embeddings]`):
+    #: per-layer embedding tables and the projection that builds them. Empty — only the input and output embeddings.
+    embedding_paths: tuple[str, ...] = ()
+    #: `post_norms` apply on every decoder layer. Otherwise only on a layer with `use_sandwich_norm` (LFM3).
+    post_norms_always: bool = False
+    #: `(config) -> cap` of the final logits (`cap · tanh(logits / cap)`); `None` — the head is linear.
+    logit_softcap: Callable[[Any], float | None] | None = None
+    #: Called before `from_pretrained` (a class patch the checkpoint's weights need).
+    before_load: Callable[[], None] | None = None
+    #: Image encoder built instead of `trener.vision.ImageEncoder`; `None` — that encoder.
+    build_images: Callable[..., Any] | None = None
+    #: Audio encoder built instead of `trener.audio.AudioEncoder`; `None` — that encoder.
+    build_audio: Callable[..., Any] | None = None
+    #: `(encoder, kind, n) -> token ids` that replace one media placeholder (`image`, `audio`); `None` — `n` copies.
+    placeholder: Callable[..., list[int]] | None = None
 
     @property
     def native(self) -> bool:
@@ -312,7 +327,7 @@ class Architecture:
             index = self.layer_index(name)
             if index is not None:
                 chosen = index in selection.layers
-            elif id(param) in embedding_ids:
+            elif id(param) in embedding_ids or any(_under(name, path) for path in self.embedding_paths):
                 chosen = selection.embeddings
             elif _under(name, self.norm_path):
                 chosen = selection.norm
@@ -330,6 +345,8 @@ class Architecture:
 
         The pipeline's own implementation does not run the checkpoint's code, so `trust_remote_code` is not used.
         """
+        if self.before_load is not None:
+            self.before_load()
         if self.model_class is not None:
             model = self.model_class.from_pretrained(str(path), dtype=dtype, attn_implementation=attn_implementation)
         else:

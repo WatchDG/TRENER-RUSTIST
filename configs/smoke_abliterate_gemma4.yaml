@@ -1,0 +1,24 @@
+# Smoke preset for abliteration of Gemma 4 E2B (docs/10-abliteration.md).
+# The example set is too small for a usable refusal direction: it checks directions, two trials and the export.
+# For an experiment, copy configs/abliterate_lfm3.yaml and point model.path here with your own prompt set.
+run:
+  name: smoke_abliterate_gemma4
+  seed: 0
+  out_dir: runs
+method: abliterate
+model:
+  path: models/Gemma-4-E2B-it
+  dtype: bfloat16
+  trust_remote_code: false
+  attn_implementation: sdpa
+  compile_kernels: false
+rollout:
+  engine: static
+  cuda_graphs: false
+abliteration:
+  prompts: datasets/abliteration/example-0001
+  max_new_tokens: 16
+  batch_size: 1
+  eval_limit: 2
+  n_trials: 2
+  n_startup_trials: 1

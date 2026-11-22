@@ -7,6 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-11-22
+
+### Added
+
+- Gemma 4 E2B (`Gemma4ForConditionalGeneration`, `models/Gemma-4-E2B-it`, `trener/architectures/gemma4.py`): the
+  `transformers` multimodal decoder (`AutoModelForCausalLM`, `model_type: gemma4`). Module groups are `language`
+  (`model.language_model`, including the per-layer embedding table, and `lm_head`), `vision` (`model.vision_tower`),
+  `projector` (`model.embed_vision`) and `audio` (`model.audio_tower`, `model.embed_audio`). The last
+  `num_kv_shared_layers` keep their own key and value projections for a forward without a cache (training and
+  scoring) and reuse the shared cache during generation; transformers 5.21 would drop those weights
+  (`install_kv_projections`). Final logits are soft-capped (`final_logit_softcapping`), and scoring applies the same
+  cap (`Architecture.logit_softcap`), so the fused loss head is not used for this model. An image is a soft-token
+  budget (70, 140, 280, 560 or 1120; the default is 280), one audio token is 40 ms (at most 750, 30 s). The chat
+  template's one `<|image|>` or `<|audio|>` is expanded to the begin token, the soft tokens and the end token
+  (`Architecture.placeholder`). A row with media passes `per_layer_inputs` computed from the token ids, because the
+  reverse lookup from `inputs_embeds` does not see replaced embeddings. Video is not supported, and the prefix cache
+  cannot resume this model. `configs/smoke_sft_gemma4.yaml`, `configs/smoke_abliterate_gemma4.yaml`.
+- Gemma 4 E4B (`models/Gemma-4-E4B-it`) uses the same architecture. 42 decoder layers, the last 18 share the KV cache
+  and keep their own projections; `use_double_wide_mlp` is off, so the MLP stays at `intermediate_size`.
+  `configs/smoke_sft_gemma4_e4b.yaml` (layers `40-41`), `configs/smoke_abliterate_gemma4_e4b.yaml`.
+- Gemma 4 media encoders built from the checkpoint's own processors instead of `trener.vision.ImageEncoder` and
+  `trener.audio.AudioEncoder` (`Architecture.build_images`, `Architecture.build_audio`): `GemmaImageEncoder` keeps the
+  soft-token budget (`model.image_max_tokens` when it is one of the allowed values) and passes `image_position_ids`,
+  `GemmaAudioEncoder` yields 16 kHz log-mel features and one language token per 40 ms. `trener.audio.AudioRef` takes
+  the token count of a clip (`tokens`) when it is not `ceil(frames / 8)`, and `trener.media.MediaEncoder` expands a
+  placeholder through `Architecture.placeholder`.
+- `model.language_layers: [embeddings]` also trains a per-layer embedding table and the projection that builds it
+  (`Architecture.embedding_paths`); for any other architecture only the input and output embeddings are selected.
+- `Architecture` describes more of what differs between models (`trener/architectures/base.py`): `post_norms_always`
+  (the post-norms apply on every decoder layer, not only with `use_sandwich_norm`), `logit_softcap`, `before_load`
+  (a class patch installed before `from_pretrained`), `build_images` / `build_audio` and `placeholder`. Abliteration
+  reads `post_norms_always` (`trener/abliteration.py`), so Gemma 4 edits `self_attn.o_proj` and `mlp.down_proj` with
+  the gains of `post_attention_layernorm` and `post_feedforward_layernorm`.
+- `specs/abliteration-prompts.md`: the normative specification of the contrast prompt set read by
+  `method: abliterate` — format version 1, the reference implementation `trener/prompt_sets.py`, the worked example
+  `datasets/abliteration/example-0001` — covering the directory, the `prompts.json` manifest, the JSONL records and
+  the text rules.
+- The README model table, the model retrieval section of `docs/07-usage/01-requirements.md` for both checkpoints
+  (E2B about 10 GB in bf16, E4B about 15 GB, neither needs `trust_remote_code`), the architecture table row in
+  `docs/07-usage/01-requirements.md` and the abliteration post-norm note in `docs/10-abliteration.md`;
+  `tests/test_gemma4.py` (KV projections, per-layer embeddings, media placeholders, soft cap, abliteration targets).
+
 ## [0.17.0] - 2026-11-22
 
 ### Added
@@ -436,7 +478,8 @@ First release.
 - Tests that need the LFM3 tokenizer are skipped when `models/LFM3-1.7B` is
   absent instead of failing.
 
-[Unreleased]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.17.0...HEAD
+[Unreleased]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.18.0...HEAD
+[0.18.0]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.14.0...v0.15.0

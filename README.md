@@ -112,6 +112,8 @@ Measure a model on GSM8K (standalone or with `--bench gsm8k` during training) an
 | LFM3-VL-2B | `Lfm3VlForConditionalGeneration` | [LiquidAI/LFM3-VL-2B](https://huggingface.co/LiquidAI/LFM3-VL-2B) | `configs/smoke_lfm3_vl_rust_code_jolt.yaml`, `configs/smoke_sft_lfm3_vl.yaml` (tasks with images, the vision layers train); any config with `--set model.path=models/LFM3-VL-2B` |
 | LFM3-Omni-2B | `Lfm3OmniForConditionalGeneration` | [LiquidAI/LFM3-Omni-2B](https://huggingface.co/LiquidAI/LFM3-Omni-2B) | `configs/sft_lfm3_omni_fleurs_ru.yaml` (Russian speech recognition on FLEURS, synthesis on the model's own speech), `configs/smoke_sft_lfm3_omni_fleurs_ru.yaml`, `configs/smoke_lfm3_omni_voice_jolt.yaml` (spoken questions); any config with `--set model.path=models/LFM3-Omni-2B` |
 | SenseNova-Loop-9B | `SenseNovaLoopForConditionalGeneration` | [sensenova/SenseNova-Loop-9B](https://huggingface.co/sensenova/SenseNova-Loop-9B) | `configs/smoke_sft_sensenova.yaml`, `configs/smoke_abliterate_sensenova.yaml`; any config with `--set model.path=models/SenseNova-Loop-9B` |
+| Gemma 4 E2B | `Gemma4ForConditionalGeneration` | [google/gemma-4-E2B-it](https://huggingface.co/google/gemma-4-E2B-it) | `configs/smoke_sft_gemma4.yaml`, `configs/smoke_abliterate_gemma4.yaml`; any config with `--set model.path=models/Gemma-4-E2B-it` |
+| Gemma 4 E4B | `Gemma4ForConditionalGeneration` | [google/gemma-4-E4B-it](https://huggingface.co/google/gemma-4-E4B-it) | `configs/smoke_sft_gemma4_e4b.yaml`, `configs/smoke_abliterate_gemma4_e4b.yaml`; any config with `--set model.path=models/Gemma-4-E4B-it` |
 
 The standard configs expect the model in `models/LFM3-1.7B` relative to the repository root. The pipeline does not
 download it: fetch the model in advance and place it there (`snapshot_download` command in
@@ -123,7 +125,9 @@ built by the checkpoint's code (`trust_remote_code`), Spark2_5 by the pipeline's
 (`trener/architectures/spark2_5.py`; the checkpoint's code does not run in transformers 5), Llama (MiniCPM5) by
 `transformers`, LFM3-VL and LFM3-Omni by the checkpoint's code through `AutoModelForImageTextToText`,
 SenseNova-Loop by the checkpoint's code through `AutoModelForCausalLM` (`trener/architectures/sensenova_loop.py`:
-a looped Qwen3.5 decoder, mHC, images with multimodal RoPE; a packed row is one forward per document). The token that closes an
+a looped Qwen3.5 decoder, mHC, images with multimodal RoPE; a packed row is one forward per document), Gemma 4 by
+`transformers` (`trener/architectures/gemma4.py`: per-layer embeddings, images and audio; the cache-sharing layers keep
+their key and value projections for training). The token that closes an
 assistant turn is read off the model's chat template and used as EOS (`trener/chat_format.py`): in MiniCPM5 it is
 `<|im_end|>`, not the checkpoint's `</s>`.
 
