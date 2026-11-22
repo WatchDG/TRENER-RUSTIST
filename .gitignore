@@ -18,6 +18,7 @@ outputs/
 cache/
 /data/
 /datasets/rust-docs/.rustdoc-target/
+/datasets/abliteration/abliteration-ru-0001/
 
 # Python
 __pycache__/
