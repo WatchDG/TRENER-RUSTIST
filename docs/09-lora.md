@@ -52,7 +52,7 @@ convolution blocks (then `targets: [q_proj]` is an error: no such layer among th
 selection. `env.txt` records the adapted layers in `lora.layers`. `model.trainable_weights` (rows, columns, blocks
 and single weights) is full fine-tuning only: with `lora.enabled` it is a configuration error.
 
-Preset: `configs/smoke_lora_rust_keywords_jolt.yaml` — the smoke run of `smoke_rust_keywords_jolt.yaml` with
+Preset: `configs/smoke/smoke_lora_rust_keywords_jolt.yaml` — the smoke run of `smoke_rust_keywords_jolt.yaml` with
 adapters on all linear layers.
 
 ## 2. What a step trains
@@ -164,7 +164,7 @@ lora:
   double_quant: true
 ```
 
-Preset: `configs/smoke_qlora_rust_keywords_jolt.yaml` — `smoke_lora_rust_keywords_jolt.yaml` with an NF4 base.
+Preset: `configs/smoke/smoke_qlora_rust_keywords_jolt.yaml` — `smoke_lora_rust_keywords_jolt.yaml` with an NF4 base.
 
 ### 7.1 What is quantized
 

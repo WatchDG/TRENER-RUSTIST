@@ -3,7 +3,7 @@
 The survey of the training path (code reading plus the timings in `runs/`) found the items below; each was measured
 before and after on an RTX 4090 and kept only for a gain of at least 3% on some workload and at most 1% loss on
 the others. Workloads: **A** — text SFT with many short documents (`configs/sft_rust_std.yaml`, 10 steps, 8 rows of
-4096 tokens, `run.profile=true`); **B** — Omni speech SFT (`configs/smoke_sft_lfm3_omni_fleurs_ru.yaml`, 12 steps of
+4096 tokens, `run.profile=true`); **B** — Omni speech SFT (`configs/smoke/smoke_sft_lfm3_omni_fleurs_ru.yaml`, 12 steps of
 8 rows, evaluation on 16 texts and clips); **C** — the JOLT control (`trener speed`, `rust_keywords_jolt`, 6 steps).
 Medians of the steps after the first two.
 

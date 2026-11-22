@@ -38,7 +38,7 @@ from trener.trainer import Trainer
 from test_lora import _config, _tiny_model
 
 CPU = torch.device("cpu")
-SMOKE = Path("configs/smoke_rust_keywords_jolt.yaml")
+SMOKE = Path("configs/smoke/smoke_rust_keywords_jolt.yaml")
 
 
 class Toy(torch.nn.Module):

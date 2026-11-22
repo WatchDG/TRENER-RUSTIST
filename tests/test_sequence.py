@@ -16,7 +16,7 @@ from trener.sequence import build_dist, latest_checkpoint, load_sequence, run_se
 def _write_stage_config(tmp_path: Path, name: str, steps: int = 2, model_path: Path | None = None) -> Path:
     from trener.config import load_config
 
-    cfg = load_config("configs/smoke_rust_keywords_jolt.yaml")
+    cfg = load_config("configs/smoke/smoke_rust_keywords_jolt.yaml")
     payload = cfg.to_dict()
     payload["run"]["name"] = name
     payload["run"]["out_dir"] = str(tmp_path / "runs")

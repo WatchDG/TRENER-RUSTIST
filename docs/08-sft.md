@@ -83,7 +83,7 @@ fields depends on `kind`:
 - `qa` of a vision-language model (LFM3-VL) may carry `images`: image files given as paths relative to the
   corpus directory, shown before the question ([12-vision.md](12-vision.md)). Their tokens count in `sft.max_tokens`,
   and the file stamp in `corpus.json` covers the images (`images: {files, sha256}`). Example — the corpus of
-  `datasets/rust-vision/rust-code-output-0001`, preset `configs/smoke_sft_lfm3_vl.yaml`.
+  `datasets/rust-vision/rust-code-output-0001`, preset `configs/smoke/smoke_sft_lfm3_vl.yaml`.
 - `qa` of a model with speech input (LFM3-Omni) may carry `audio` clips (then `question` may be empty: speech
   recognition), and a `speech` record teaches a speech answer: the model says the recording `speech` in reply to
   `text`. The step loss pools text tokens and speech frames (`sft.text_loss_weight`, `sft.speech_loss_weight`), the

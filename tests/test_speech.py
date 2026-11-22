@@ -501,7 +501,7 @@ def test_real_omni_trains_the_voice_on_russian(project_root: Path, tmp_path: Pat
 
     if not (OMNI_PATH / "model.safetensors").is_file():
         pytest.skip(f"LFM3-Omni checkpoint is unavailable: {OMNI_PATH}")
-    cfg = load_config(project_root / "configs" / "smoke_sft_lfm3_omni_fleurs_ru.yaml")
+    cfg = load_config(project_root / "configs" / "smoke" / "smoke_sft_lfm3_omni_fleurs_ru.yaml")
     cfg = apply_overrides(cfg, ["model.compile_kernels=false"])
     policy = load_policy(cfg)
     assert policy.info["trainable_groups"] == [AUDIO, LANGUAGE, VOICE]
@@ -544,8 +544,8 @@ def test_real_omni_trains_the_voice_on_russian(project_root: Path, tmp_path: Pat
     ("name", "method", "trainable"),
     [
         ("sft_lfm3_omni_fleurs_ru.yaml", "sft", ["language", "audio", "voice"]),
-        ("smoke_sft_lfm3_omni_fleurs_ru.yaml", "sft", ["language", "audio", "voice"]),
-        ("smoke_lfm3_omni_voice_jolt.yaml", "jolt", ["language", "audio"]),
+        ("smoke/smoke_sft_lfm3_omni_fleurs_ru.yaml", "sft", ["language", "audio", "voice"]),
+        ("smoke/smoke_lfm3_omni_voice_jolt.yaml", "jolt", ["language", "audio"]),
     ],
 )
 def test_speech_presets_load(project_root: Path, name: str, method: str, trainable: list[str]) -> None:

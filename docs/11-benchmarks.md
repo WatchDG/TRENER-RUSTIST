@@ -116,7 +116,7 @@ and `p` is the exact McNemar test on them — a small `p` means the change is no
 ## 11.6 Measurement
 
 Base `LFM3-1.7B`, the whole GSM8K test (1319 tasks), `engine: static`, `batch_size: 64`, RTX 4090, 2026-11-03
-(`bench run` with `configs/smoke_rust_keywords_jolt.yaml`):
+(`bench run` with `configs/smoke/smoke_rust_keywords_jolt.yaml`):
 
 | `max_new_tokens` | Accuracy | 95% CI | Flexible | No `\boxed{}` | Truncated | Mean tokens | Time |
 |---|---|---|---|---|---|---|---|

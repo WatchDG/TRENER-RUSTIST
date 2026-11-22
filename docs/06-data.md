@@ -245,7 +245,7 @@ base model reasons inside `<think>` and, without training, often hits `max_new_t
 question or the verdict: at the start the reward is close to 0.
 
 The commands are the same as in §6.6: `trener data validate datasets/reverse-rust/reverse-rust-0001 --update-manifest`,
-presets `configs/tutor_rust_jolt.yaml` and `configs/smoke_tutor_rust_jolt.yaml`. Evaluation (`trener eval`)
+presets `configs/tutor_rust_jolt.yaml` and `configs/smoke/smoke_tutor_rust_jolt.yaml`. Evaluation (`trener eval`)
 runs the same dialogue greedily and puts the model's question, the reply and the evaluation into `per_task[*].turns`.
 
 ## 6.9 Contrast prompts for abliteration

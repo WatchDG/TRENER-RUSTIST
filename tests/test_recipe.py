@@ -12,7 +12,7 @@ from trener.config import ConfigError, apply_overrides, clone_config, load_confi
 from trener.recipe import dump_recipe, load_recipe, save_recipe
 from trener.regions import format_ranges
 
-SMOKE = Path("configs/smoke_rust_keywords_jolt.yaml")
+SMOKE = Path("configs/smoke/smoke_rust_keywords_jolt.yaml")
 
 
 def _write(path: Path, payload: Any) -> Path:

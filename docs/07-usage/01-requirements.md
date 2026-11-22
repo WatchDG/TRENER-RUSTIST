@@ -21,14 +21,14 @@ The standard configs (`configs/`) take the model from `models/LFM3-1.7B` relativ
 Relative paths in configs (`model.path`, `task.dataset`, `run.out_dir`, `sft.corpus`) are resolved against the
 repository root, not the current directory. To use a model from another location, pass `--set model.path=<dir>` or change `model.path` in the config.
 
-Spark-X2.6-1.7B goes to `models/Spark-X2.6-1.7B`; `configs/smoke_spark_rust_keywords_jolt.yaml` is the smoke preset
+Spark-X2.6-1.7B goes to `models/Spark-X2.6-1.7B`; `configs/smoke/smoke_spark_rust_keywords_jolt.yaml` is the smoke preset
 on it, and any other config runs on it with `--set model.path=models/Spark-X2.6-1.7B`:
 
 ```powershell
 .venv\Scripts\python.exe -c "from huggingface_hub import snapshot_download; snapshot_download('XHToken/Spark-X2.6-1.7B', local_dir='models/Spark-X2.6-1.7B')"
 ```
 
-MiniCPM5-2B goes to `models/MiniCPM5-2B`; `configs/smoke_minicpm_rust_keywords_jolt.yaml` is the smoke preset on it,
+MiniCPM5-2B goes to `models/MiniCPM5-2B`; `configs/smoke/smoke_minicpm_rust_keywords_jolt.yaml` is the smoke preset on it,
 and any other config runs on it with `--set model.path=models/MiniCPM5-2B` (`model.trust_remote_code` is not needed:
 the checkpoint has no code):
 
@@ -37,7 +37,7 @@ the checkpoint has no code):
 ```
 
 Gemma 4 E2B goes to `models/Gemma-4-E2B-it` ([google/gemma-4-E2B-it](https://huggingface.co/google/gemma-4-E2B-it));
-`configs/smoke_sft_gemma4.yaml` and `configs/smoke_abliterate_gemma4.yaml` are the smoke presets, and any other config
+`configs/smoke/smoke_sft_gemma4.yaml` and `configs/smoke/smoke_abliterate_gemma4.yaml` are the smoke presets, and any other config
 runs on it with `--set model.path=models/Gemma-4-E2B-it`. The weights are about 10 GB in bf16 (the 262 144-token
 embedding and the per-layer embedding table). `model.trust_remote_code` is not needed. Images use the checkpoint's
 soft-token budget (280 unless `model.image_max_tokens` is 70, 140, 280, 560 or 1120); audio is one token per 40 ms.
@@ -48,8 +48,8 @@ Video is not supported. The prefix cache does not resume this model.
 ```
 
 Gemma 4 E4B goes to `models/Gemma-4-E4B-it` ([google/gemma-4-E4B-it](https://huggingface.co/google/gemma-4-E4B-it)) and
-uses the same architecture (`Gemma4ForConditionalGeneration`). `configs/smoke_sft_gemma4_e4b.yaml` and
-`configs/smoke_abliterate_gemma4_e4b.yaml` are the smoke presets; any other config runs on it with
+uses the same architecture (`Gemma4ForConditionalGeneration`). `configs/smoke/smoke_sft_gemma4_e4b.yaml` and
+`configs/smoke/smoke_abliterate_gemma4_e4b.yaml` are the smoke presets; any other config runs on it with
 `--set model.path=models/Gemma-4-E4B-it`. The weights are about 15 GB in bf16. The language model has 42 layers
 (the smoke preset trains `40-41`); `use_double_wide_mlp` is off, so the MLP stays at `intermediate_size`. Images,
 audio, video and the prefix cache are the same as E2B.
@@ -60,7 +60,7 @@ audio, video and the prefix cache are the same as E2B.
 
 LFM3-VL-2B goes to `models/LFM3-VL-2B`; its tasks and corpus records may carry images, and the vision tower and the
 projector train together with the language model ([12-vision.md](../12-vision.md)). The smoke presets
-`configs/smoke_lfm3_vl_rust_code_jolt.yaml` (JOLT) and `configs/smoke_sft_lfm3_vl.yaml` (`sft`) run on the image set
+`configs/smoke/smoke_lfm3_vl_rust_code_jolt.yaml` (JOLT) and `configs/smoke/smoke_sft_lfm3_vl.yaml` (`sft`) run on the image set
 `datasets/rust-vision/rust-code-output-0001`; a text-only config runs on it with `--set model.path=models/LFM3-VL-2B`:
 
 ```powershell

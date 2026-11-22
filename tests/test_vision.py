@@ -397,7 +397,7 @@ def test_real_lfm3_vl_trains_the_vision_layers(project_root: Path) -> None:
 
     if not (VL_PATH / "model.safetensors").is_file():
         pytest.skip(f"LFM3-VL checkpoint is unavailable: {VL_PATH}")
-    cfg = load_config(project_root / "configs" / "smoke_lfm3_vl_rust_code_jolt.yaml")
+    cfg = load_config(project_root / "configs" / "smoke" / "smoke_lfm3_vl_rust_code_jolt.yaml")
     cfg = apply_overrides(cfg, ["model.compile_kernels=false"])
     policy = load_policy(cfg)
     assert policy.info["architecture"] == "Lfm3VlForConditionalGeneration"

@@ -21,7 +21,7 @@ from trener.schedule import resolve_schedule
 
 PRESETS = [
     ("configs/rust_std/rust_keywords_jolt.yaml", "jolt"),
-    ("configs/smoke_rust_keywords_jolt.yaml", "jolt"),
+    ("configs/smoke/smoke_rust_keywords_jolt.yaml", "jolt"),
 ]
 
 
@@ -61,7 +61,7 @@ def test_b16_preset_rolls_out_in_one_call(project_root: Path) -> None:
 
 
 def test_smoke_preset_is_short(project_root: Path) -> None:
-    cfg = load_config(project_root / "configs/smoke_rust_keywords_jolt.yaml")
+    cfg = load_config(project_root / "configs/smoke/smoke_rust_keywords_jolt.yaml")
     assert cfg.optim.steps == 3
     assert cfg.rollout.batch_size == 2
     assert cfg.rollout.group_size == 2
@@ -81,7 +81,7 @@ def test_sampling_parameters_are_always_explicit(project_root: Path) -> None:
 
 
 def _config_with(**overrides: Any) -> JoltConfig:
-    cfg = clone_config(load_config(Path("configs/smoke_rust_keywords_jolt.yaml")))
+    cfg = clone_config(load_config(Path("configs/smoke/smoke_rust_keywords_jolt.yaml")))
     for key, value in overrides.items():
         section, _, field = key.partition("__")
         setattr(getattr(cfg, section), field, value)
@@ -175,13 +175,13 @@ def test_unknown_top_level_field_is_rejected(tmp_path: Path) -> None:
 
 
 def test_relative_paths_resolve_against_repository_root(project_root: Path) -> None:
-    cfg = load_config(project_root / "configs/smoke_rust_keywords_jolt.yaml")
+    cfg = load_config(project_root / "configs/smoke/smoke_rust_keywords_jolt.yaml")
     assert cfg.run.out_dir == (project_root / "runs").resolve()
     assert cfg.model.path.is_absolute()
 
 
 def test_apply_overrides_changes_field() -> None:
-    cfg = load_config(Path("configs/smoke_rust_keywords_jolt.yaml"))
+    cfg = load_config(Path("configs/smoke/smoke_rust_keywords_jolt.yaml"))
     updated = apply_overrides(cfg, ["optim.lr=2e-6", "optim.steps=7", "method=jolt+"])
     assert updated.optim.lr == pytest.approx(2e-6)
     assert updated.optim.steps == 7
@@ -197,7 +197,7 @@ def test_override_of_steps_clears_epochs_twin() -> None:
 
 
 def test_override_of_epochs_clears_steps_twin() -> None:
-    cfg = load_config(Path("configs/smoke_rust_keywords_jolt.yaml"))
+    cfg = load_config(Path("configs/smoke/smoke_rust_keywords_jolt.yaml"))
     updated = apply_overrides(cfg, ["optim.epochs=3", "eval.every_epochs=1"])
     assert updated.optim.epochs == 3
     assert updated.eval.every_epochs == 1
@@ -213,13 +213,13 @@ def test_steps_and_epochs_in_one_section_conflict(tmp_path: Path) -> None:
 
 
 def test_apply_overrides_rejects_unknown_field() -> None:
-    cfg = load_config(Path("configs/smoke_rust_keywords_jolt.yaml"))
+    cfg = load_config(Path("configs/smoke/smoke_rust_keywords_jolt.yaml"))
     with pytest.raises(ConfigError):
         apply_overrides(cfg, ["optim.unknown=1"])
 
 
 def test_config_snapshot_roundtrip(tmp_path: Path) -> None:
-    cfg = load_config(Path("configs/smoke_rust_keywords_jolt.yaml"))
+    cfg = load_config(Path("configs/smoke/smoke_rust_keywords_jolt.yaml"))
     snapshot = tmp_path / "config.yaml"
     snapshot.write_text(yaml.safe_dump(cfg.to_dict(), sort_keys=False, allow_unicode=True), encoding="utf-8")
     restored = load_config(snapshot)
@@ -238,7 +238,7 @@ def test_config_snapshot_roundtrip(tmp_path: Path) -> None:
 )
 def test_wrong_value_type_raises_config_error(tmp_path: Path, section: str, field: str, value: Any) -> None:
     """A wrong value type in YAML raises `ConfigError` naming the field, not `TypeError`."""
-    payload = yaml.safe_load(Path("configs/smoke_rust_keywords_jolt.yaml").read_text(encoding="utf-8"))
+    payload = yaml.safe_load(Path("configs/smoke/smoke_rust_keywords_jolt.yaml").read_text(encoding="utf-8"))
     payload[section][field] = value
     path = tmp_path / "config.yaml"
     path.write_text(yaml.safe_dump(payload, sort_keys=False, allow_unicode=True), encoding="utf-8")
@@ -255,7 +255,7 @@ def test_wrong_value_type_raises_config_error(tmp_path: Path, section: str, fiel
     ],
 )
 def test_epochs_must_be_whole_numbers(tmp_path: Path, section: str, step_field: str, field: str, value: Any) -> None:
-    payload = yaml.safe_load(Path("configs/smoke_rust_keywords_jolt.yaml").read_text(encoding="utf-8"))
+    payload = yaml.safe_load(Path("configs/smoke/smoke_rust_keywords_jolt.yaml").read_text(encoding="utf-8"))
     payload[section].pop(step_field, None)
     payload[section][field] = value
     path = tmp_path / "config.yaml"
@@ -266,7 +266,7 @@ def test_epochs_must_be_whole_numbers(tmp_path: Path, section: str, step_field: 
 
 def test_rejected_override_leaves_config_untouched() -> None:
     """A rejected override does not change the original config."""
-    cfg = load_config(Path("configs/smoke_rust_keywords_jolt.yaml"))
+    cfg = load_config(Path("configs/smoke/smoke_rust_keywords_jolt.yaml"))
     before = cfg.to_dict()
     with pytest.raises(ConfigError):
         apply_overrides(cfg, ["optim.steps=7", "rollout.group_size=1"])
@@ -274,7 +274,7 @@ def test_rejected_override_leaves_config_untouched() -> None:
 
 
 def test_override_with_wrong_type_raises_config_error() -> None:
-    cfg = load_config(Path("configs/smoke_rust_keywords_jolt.yaml"))
+    cfg = load_config(Path("configs/smoke/smoke_rust_keywords_jolt.yaml"))
     with pytest.raises(ConfigError, match="rollout.group_size"):
         apply_overrides(cfg, ["rollout.group_size=four"])
 
@@ -319,7 +319,7 @@ def test_speedup_defaults_keep_baseline_behaviour() -> None:
 
 
 def test_speedup_fields_accept_overrides_and_roundtrip() -> None:
-    cfg = load_config(Path("configs/smoke_rust_keywords_jolt.yaml"))
+    cfg = load_config(Path("configs/smoke/smoke_rust_keywords_jolt.yaml"))
     cfg = apply_overrides(
         cfg,
         ["rollout.engine=static", "rollout.cuda_graphs=false", "rollout.micro_batch_tokens=4096", "run.profile=true"],
@@ -412,7 +412,7 @@ def test_new_fields_can_be_overridden() -> None:
     "path",
     [
         "configs/rust_std/rust_keywords_jolt.yaml",
-        "configs/smoke_rust_keywords_jolt.yaml",
+        "configs/smoke/smoke_rust_keywords_jolt.yaml",
     ],
 )
 def test_jolt_presets_enable_measured_memory_measures(project_root: Path, path: str) -> None:
@@ -428,7 +428,7 @@ def test_jolt_presets_enable_measured_memory_measures(project_root: Path, path: 
 
 def test_task_dataset_is_resolved_from_repo_root(project_root: Path, tmp_path: Path) -> None:
     """`task.dataset` is the path to the dataset directory: relative — from the repository root, absolute — as is."""
-    cfg = load_config(project_root / "configs/smoke_rust_keywords_jolt.yaml")
+    cfg = load_config(project_root / "configs/smoke/smoke_rust_keywords_jolt.yaml")
     relative = apply_overrides(cfg, ["task.dataset=datasets/rust/rust-keywords-0001"])
     assert relative.task.dataset == project_root / "datasets" / "rust" / "rust-keywords-0001"
     absolute = apply_overrides(cfg, [f"task.dataset={tmp_path}"])
@@ -477,6 +477,7 @@ def test_all_presets_use_auto_eval_batch_mode(project_root: Path) -> None:
     paths = sorted(
         [
             *(project_root / "configs").glob("*.yaml"),
+            *(project_root / "configs/smoke").glob("*.yaml"),
             *(project_root / "configs/rust_cargo").glob("*.yaml"),
             *(project_root / "configs/rust_std").glob("*.yaml"),
         ]
@@ -506,7 +507,7 @@ def test_trainable_groups_and_lora_exclude_each_other() -> None:
     validate_config(_config_with(lora__enabled=True, lora__modules=["language", "vision"]))
 
 
-@pytest.mark.parametrize("path", ["configs/smoke_lfm3_vl_rust_code_jolt.yaml", "configs/smoke_sft_lfm3_vl.yaml"])
+@pytest.mark.parametrize("path", ["configs/smoke/smoke_lfm3_vl_rust_code_jolt.yaml", "configs/smoke/smoke_sft_lfm3_vl.yaml"])
 def test_vision_presets_load(project_root: Path, path: str) -> None:
     cfg = load_config(project_root / path)
     assert cfg.model.path == project_root / "models" / "LFM3-VL-2B"

@@ -58,7 +58,7 @@ py -3.13 -m venv .venv
 
 # check a dataset, run a short smoke training, then a full preset
 .venv\Scripts\python.exe -m trener data validate datasets/rust/rust-keywords-0001
-.venv\Scripts\python.exe -m trener train --config configs/smoke_tutor_rust_jolt.yaml
+.venv\Scripts\python.exe -m trener train --config configs/smoke/smoke_tutor_rust_jolt.yaml
 .venv\Scripts\python.exe -m trener train --config configs/rust_std/rust_keywords_jolt.yaml
 ```
 
@@ -107,13 +107,13 @@ Measure a model on GSM8K (standalone or with `--bench gsm8k` during training) an
 | Model | Architecture | Hugging Face | Configs |
 |---|---|---|---|
 | LFM3-1.7B | `Lfm3ForCausalLM` | [LiquidAI/LFM3-1.7B](https://huggingface.co/LiquidAI/LFM3-1.7B) | `configs/` (default path `models/LFM3-1.7B`) |
-| Spark-X2.6-1.7B | `Spark2_5ForCausalLM` | [XHToken/Spark-X2.6-1.7B](https://huggingface.co/XHToken/Spark-X2.6-1.7B) | `configs/smoke_spark_rust_keywords_jolt.yaml`; any config with `--set model.path=models/Spark-X2.6-1.7B` |
-| MiniCPM5-2B | `LlamaForCausalLM` | [openbmb/MiniCPM5-2B](https://huggingface.co/openbmb/MiniCPM5-2B) | `configs/smoke_minicpm_rust_keywords_jolt.yaml`; any config with `--set model.path=models/MiniCPM5-2B` |
-| LFM3-VL-2B | `Lfm3VlForConditionalGeneration` | [LiquidAI/LFM3-VL-2B](https://huggingface.co/LiquidAI/LFM3-VL-2B) | `configs/smoke_lfm3_vl_rust_code_jolt.yaml`, `configs/smoke_sft_lfm3_vl.yaml` (tasks with images, the vision layers train); any config with `--set model.path=models/LFM3-VL-2B` |
-| LFM3-Omni-2B | `Lfm3OmniForConditionalGeneration` | [LiquidAI/LFM3-Omni-2B](https://huggingface.co/LiquidAI/LFM3-Omni-2B) | `configs/sft_lfm3_omni_fleurs_ru.yaml` (Russian speech recognition on FLEURS, synthesis on the model's own speech), `configs/smoke_sft_lfm3_omni_fleurs_ru.yaml`, `configs/smoke_lfm3_omni_voice_jolt.yaml` (spoken questions); any config with `--set model.path=models/LFM3-Omni-2B` |
-| SenseNova-Loop-9B | `SenseNovaLoopForConditionalGeneration` | [sensenova/SenseNova-Loop-9B](https://huggingface.co/sensenova/SenseNova-Loop-9B) | `configs/smoke_sft_sensenova.yaml`, `configs/smoke_abliterate_sensenova.yaml`; any config with `--set model.path=models/SenseNova-Loop-9B` |
-| Gemma 4 E2B | `Gemma4ForConditionalGeneration` | [google/gemma-4-E2B-it](https://huggingface.co/google/gemma-4-E2B-it) | `configs/smoke_sft_gemma4.yaml`, `configs/smoke_abliterate_gemma4.yaml`; any config with `--set model.path=models/Gemma-4-E2B-it` |
-| Gemma 4 E4B | `Gemma4ForConditionalGeneration` | [google/gemma-4-E4B-it](https://huggingface.co/google/gemma-4-E4B-it) | `configs/smoke_sft_gemma4_e4b.yaml`, `configs/smoke_abliterate_gemma4_e4b.yaml`; any config with `--set model.path=models/Gemma-4-E4B-it` |
+| Spark-X2.6-1.7B | `Spark2_5ForCausalLM` | [XHToken/Spark-X2.6-1.7B](https://huggingface.co/XHToken/Spark-X2.6-1.7B) | `configs/smoke/smoke_spark_rust_keywords_jolt.yaml`; any config with `--set model.path=models/Spark-X2.6-1.7B` |
+| MiniCPM5-2B | `LlamaForCausalLM` | [openbmb/MiniCPM5-2B](https://huggingface.co/openbmb/MiniCPM5-2B) | `configs/smoke/smoke_minicpm_rust_keywords_jolt.yaml`; any config with `--set model.path=models/MiniCPM5-2B` |
+| LFM3-VL-2B | `Lfm3VlForConditionalGeneration` | [LiquidAI/LFM3-VL-2B](https://huggingface.co/LiquidAI/LFM3-VL-2B) | `configs/smoke/smoke_lfm3_vl_rust_code_jolt.yaml`, `configs/smoke/smoke_sft_lfm3_vl.yaml` (tasks with images, the vision layers train); any config with `--set model.path=models/LFM3-VL-2B` |
+| LFM3-Omni-2B | `Lfm3OmniForConditionalGeneration` | [LiquidAI/LFM3-Omni-2B](https://huggingface.co/LiquidAI/LFM3-Omni-2B) | `configs/sft_lfm3_omni_fleurs_ru.yaml` (Russian speech recognition on FLEURS, synthesis on the model's own speech), `configs/smoke/smoke_sft_lfm3_omni_fleurs_ru.yaml`, `configs/smoke/smoke_lfm3_omni_voice_jolt.yaml` (spoken questions); any config with `--set model.path=models/LFM3-Omni-2B` |
+| SenseNova-Loop-9B | `SenseNovaLoopForConditionalGeneration` | [sensenova/SenseNova-Loop-9B](https://huggingface.co/sensenova/SenseNova-Loop-9B) | `configs/smoke/smoke_sft_sensenova.yaml`, `configs/smoke/smoke_abliterate_sensenova.yaml`; any config with `--set model.path=models/SenseNova-Loop-9B` |
+| Gemma 4 E2B | `Gemma4ForConditionalGeneration` | [google/gemma-4-E2B-it](https://huggingface.co/google/gemma-4-E2B-it) | `configs/smoke/smoke_sft_gemma4.yaml`, `configs/smoke/smoke_abliterate_gemma4.yaml`; any config with `--set model.path=models/Gemma-4-E2B-it` |
+| Gemma 4 E4B | `Gemma4ForConditionalGeneration` | [google/gemma-4-E4B-it](https://huggingface.co/google/gemma-4-E4B-it) | `configs/smoke/smoke_sft_gemma4_e4b.yaml`, `configs/smoke/smoke_abliterate_gemma4_e4b.yaml`; any config with `--set model.path=models/Gemma-4-E4B-it` |
 
 The standard configs expect the model in `models/LFM3-1.7B` relative to the repository root. The pipeline does not
 download it: fetch the model in advance and place it there (`snapshot_download` command in

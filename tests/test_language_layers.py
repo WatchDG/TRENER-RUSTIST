@@ -24,7 +24,7 @@ from test_lora import _config, _lora, _tiny_model
 CPU = torch.device("cpu")
 #: Layer types of `conftest.make_tiny_lfm3_model`.
 LFM3_TYPES = ("conv", "conv", "full_attention", "conv", "sliding_attention", "conv")
-SMOKE = Path("configs/smoke_rust_keywords_jolt.yaml")
+SMOKE = Path("configs/smoke/smoke_rust_keywords_jolt.yaml")
 
 
 def _trained(model: Any) -> set[str]:

@@ -11,7 +11,7 @@ from trener.schedule import resolve_schedule, resolved_steps, schedule_info, wit
 
 
 def _epoch_config(**fields: int) -> JoltConfig:
-    cfg = clone_config(load_config(Path("configs/smoke_rust_keywords_jolt.yaml")))
+    cfg = clone_config(load_config(Path("configs/smoke/smoke_rust_keywords_jolt.yaml")))
     for key, value in fields.items():
         section, _, name = key.partition("__")
         setattr(getattr(cfg, section), name, value)
@@ -45,7 +45,7 @@ def test_intervals_round_and_stay_positive() -> None:
 
 
 def test_step_values_are_kept_when_epochs_are_not_set() -> None:
-    cfg = load_config(Path("configs/smoke_rust_keywords_jolt.yaml"))
+    cfg = load_config(Path("configs/smoke/smoke_rust_keywords_jolt.yaml"))
     resolved = resolve_schedule(cfg, 200.0)
     assert resolved.to_dict() == cfg.to_dict()
     assert resolved is not cfg
@@ -84,5 +84,5 @@ def test_with_steps_overrides_epochs() -> None:
 
 
 def test_resolved_steps_of_step_config_needs_no_data() -> None:
-    cfg = load_config(Path("configs/smoke_rust_keywords_jolt.yaml"))
+    cfg = load_config(Path("configs/smoke/smoke_rust_keywords_jolt.yaml"))
     assert resolved_steps(cfg) == cfg.optim.steps

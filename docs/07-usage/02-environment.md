@@ -37,4 +37,4 @@ Your own set of tasks (`question`, `answer`, `reason`, `answer_type`) is connect
 `task.dataset` field or `--set task.dataset=data/<dataset>` — see [06-data.md §6.6](../06-data.md).
 The dialogue where "the model asks a question and evaluates the user's answer" (`mode: tutor`) —
 [06-data.md §6.8](../06-data.md); presets `configs/tutor_rust_jolt.yaml` and
-`configs/smoke_tutor_rust_jolt.yaml`.
+`configs/smoke/smoke_tutor_rust_jolt.yaml`.

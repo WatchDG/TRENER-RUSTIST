@@ -26,7 +26,7 @@ block, slice sums, the Collatz sequence — with random parameters; no program o
 
 The directory is also a `jolt-corpus` corpus ([docs/08-sft.md](../../../docs/08-sft.md)): `corpus.json` and
 `sft.train.jsonl` / `sft.test.jsonl` — the same tasks as `kind: qa` records with the same images and the answer
-"`<reason>` The program prints `\boxed{N}`." (preset `configs/smoke_sft_lfm3_vl.yaml`).
+"`<reason>` The program prints `\boxed{N}`." (preset `configs/smoke/smoke_sft_lfm3_vl.yaml`).
 
 ## Building
 

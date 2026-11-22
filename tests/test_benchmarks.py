@@ -25,7 +25,7 @@ from trener.config import BenchConfig, ConfigError, apply_overrides, load_config
 from trener.data import Task, load_tasks, read_manifest, write_dataset
 from trener.rollout import Trajectory
 
-SMOKE = Path("configs/smoke_rust_keywords_jolt.yaml")
+SMOKE = Path("configs/smoke/smoke_rust_keywords_jolt.yaml")
 
 
 def _task(task_id: str, answer: str) -> Task:

@@ -360,7 +360,7 @@ def test_lora_config_validation(tmp_path: Path) -> None:
 
 
 def test_lora_targets_from_yaml_overrides_and_snapshot(tmp_path: Path, project_root: Path) -> None:
-    cfg = load_config(project_root / "configs/smoke_lora_rust_keywords_jolt.yaml")
+    cfg = load_config(project_root / "configs/smoke/smoke_lora_rust_keywords_jolt.yaml")
     assert cfg.lora.enabled and cfg.lora.targets == [] and cfg.method == "jolt"
 
     cfg = apply_overrides(cfg, ["lora.targets=[q_proj, v_proj]", "lora.r=8"])

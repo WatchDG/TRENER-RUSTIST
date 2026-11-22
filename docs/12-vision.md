@@ -119,13 +119,13 @@ and their targets get plain `LoraLinear` adapters.
 
 | File | Method | Purpose |
 |---|---|---|
-| `configs/smoke_lfm3_vl_rust_code_jolt.yaml` | `jolt` | 3 steps on `rust-code-output-0001`: `B=2`, `G=2`, `max_new_tokens=256`, `image_max_tokens=256`, all three groups train |
-| `configs/smoke_sft_lfm3_vl.yaml` | `sft` | 3 steps of 4 rows of ≤ 2048 tokens on the corpus of `rust-code-output-0001`, `vision_lr_scale=0.5` |
+| `configs/smoke/smoke_lfm3_vl_rust_code_jolt.yaml` | `jolt` | 3 steps on `rust-code-output-0001`: `B=2`, `G=2`, `max_new_tokens=256`, `image_max_tokens=256`, all three groups train |
+| `configs/smoke/smoke_sft_lfm3_vl.yaml` | `sft` | 3 steps of 4 rows of ≤ 2048 tokens on the corpus of `rust-code-output-0001`, `vision_lr_scale=0.5` |
 
 ```powershell
-.venv\Scripts\python.exe -m trener data validate datasets/rust-vision/rust-code-output-0001 --config configs/smoke_lfm3_vl_rust_code_jolt.yaml
-.venv\Scripts\python.exe -m trener train --config configs/smoke_lfm3_vl_rust_code_jolt.yaml
-.venv\Scripts\python.exe -m trener train --config configs/smoke_sft_lfm3_vl.yaml
+.venv\Scripts\python.exe -m trener data validate datasets/rust-vision/rust-code-output-0001 --config configs/smoke/smoke_lfm3_vl_rust_code_jolt.yaml
+.venv\Scripts\python.exe -m trener train --config configs/smoke/smoke_lfm3_vl_rust_code_jolt.yaml
+.venv\Scripts\python.exe -m trener train --config configs/smoke/smoke_sft_lfm3_vl.yaml
 ```
 
 On an RTX 4090 the JOLT smoke preset takes 3–7 s per step with a peak of 13.1 GB of VRAM (15.8 GB reserved); a

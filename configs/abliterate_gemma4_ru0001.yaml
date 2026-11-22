@@ -1,0 +1,32 @@
+# Abliteration of Gemma-4-E2B-it on the Russian refusal set abliteration-ru-0001.
+# Gemma4 audio tower needs eager attention; sdpa fails at load time.
+run:
+  name: abliterate_gemma4_ru0001_t1000_v2
+  seed: 0
+  out_dir: runs
+method: abliterate
+model:
+  path: models/Gemma-4-E2B-it
+  dtype: bfloat16
+  trust_remote_code: false
+  attn_implementation: eager
+  compile_kernels: false
+rollout:
+  engine: static
+  cuda_graphs: false
+abliteration:
+  prompts: datasets/abliteration/abliteration-ru-0001
+  direction_split: train
+  eval_split: test
+  eval_limit: 100
+  system_prompt: ""
+  enable_thinking: false
+  max_new_tokens: 1000
+  batch_size: 8
+  orthogonalize_direction: true
+  row_normalization: full
+  n_trials: 200
+  n_startup_trials: 20
+  trial: -1
+  max_kl: 1.0
+  refusal_markers: []

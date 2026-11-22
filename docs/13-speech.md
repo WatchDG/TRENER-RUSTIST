@@ -134,8 +134,8 @@ model already pronounces well in its own voice and teaches recognition on real s
 | File | Method | Purpose |
 |---|---|---|
 | `configs/sft_lfm3_omni_fleurs_ru.yaml` | `sft` | Russian speech on `data/self-speech-ru-0001`: `trainable: [language, audio, voice]` (vision frozen), 2 epochs, `lr=1e-5`, `voice_lr_scale=2`, evaluation every epoch on 16 FLEURS dev texts and clips |
-| `configs/smoke_sft_lfm3_omni_fleurs_ru.yaml` | `sft` | 3 steps on the FLEURS `--limit 32` corpus (exercises both record kinds), evaluation on 4 |
-| `configs/smoke_lfm3_omni_voice_jolt.yaml` | `jolt` | JOLT on spoken questions (`datasets/rust-voice/rust-keywords-voice-0001`) |
+| `configs/smoke/smoke_sft_lfm3_omni_fleurs_ru.yaml` | `sft` | 3 steps on the FLEURS `--limit 32` corpus (exercises both record kinds), evaluation on 4 |
+| `configs/smoke/smoke_lfm3_omni_voice_jolt.yaml` | `jolt` | JOLT on spoken questions (`datasets/rust-voice/rust-keywords-voice-0001`) |
 
 Measured on an RTX 4090 (`lr=1e-5`, `voice_lr_scale=2`, evaluation on 12 FLEURS dev texts and clips; the base model
 already speaks and hears Russian fairly well although its card does not list it):

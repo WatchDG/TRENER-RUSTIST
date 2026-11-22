@@ -2,7 +2,7 @@
 
 ```powershell
 # short run (connectivity check, ~1.5 minutes on GPU)
-.venv\Scripts\python.exe -m trener train --config configs/smoke_tutor_rust_jolt.yaml
+.venv\Scripts\python.exe -m trener train --config configs/smoke/smoke_tutor_rust_jolt.yaml
 
 # production run (rust-keywords dataset)
 .venv\Scripts\python.exe -m trener train --config configs/rust_std/rust_keywords_jolt.yaml

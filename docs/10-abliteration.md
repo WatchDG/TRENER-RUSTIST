@@ -61,7 +61,7 @@ Presets:
 
 | File | Purpose |
 |---|---|
-| `configs/smoke_abliterate_lfm3.yaml` | end-to-end check on the example set: 4 trials, `max_new_tokens=32` |
+| `configs/smoke/smoke_abliterate_lfm3.yaml` | end-to-end check on the example set: 4 trials, `max_new_tokens=32` |
 | `configs/abliterate_lfm3.yaml` | the experiment preset: 100 trials (30 random); replace `prompts` with your own set |
 
 ```powershell

@@ -298,11 +298,11 @@ def test_qlora_config_validation_overrides_and_preset(tmp_path: Path, project_ro
         with pytest.raises(ConfigError, match=match):
             validate_config(JoltConfig(lora=bad))
 
-    cfg = load_config(project_root / "configs/smoke_qlora_rust_keywords_jolt.yaml")
+    cfg = load_config(project_root / "configs/smoke/smoke_qlora_rust_keywords_jolt.yaml")
     assert cfg.lora.enabled and cfg.lora.quantize == "nf4" and cfg.lora.double_quant
     assert "lora=r16 nf4" in describe(cfg)
 
-    cfg = load_config(project_root / "configs/smoke_lora_rust_keywords_jolt.yaml")
+    cfg = load_config(project_root / "configs/smoke/smoke_lora_rust_keywords_jolt.yaml")
     cfg = apply_overrides(cfg, ["lora.quantize=nf4", "lora.double_quant=false", "lora.quant_block_size=128"])
     assert (cfg.lora.quantize, cfg.lora.double_quant, cfg.lora.quant_block_size) == ("nf4", False, 128)
     snapshot = save_config(cfg, tmp_path / "config.yaml")
