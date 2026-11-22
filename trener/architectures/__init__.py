@@ -2,7 +2,8 @@
 
 The architecture of a model is the `architectures` field of its `config.json` — `Lfm3ForCausalLM` (LFM3),
 `Lfm3VlForConditionalGeneration` (LFM3-VL), `Lfm3OmniForConditionalGeneration` (LFM3-Omni),
-`Spark2_5ForCausalLM` (Spark-X2.6), `LlamaForCausalLM` (MiniCPM5) — not
+`Spark2_5ForCausalLM` (Spark-X2.6), `LlamaForCausalLM` (MiniCPM5),
+`SenseNovaLoopForConditionalGeneration` (SenseNova-Loop) — not
 its name or directory. Every architecture is
 described in its own module (`trener/architectures/<architecture>.py`, `Architecture`): how its model is built — by
 the checkpoint's code (`trust_remote_code`), by `transformers` or by the pipeline's own implementation — where its
@@ -18,7 +19,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-from . import lfm3, lfm3_omni, lfm3_vl, llama, spark2_5
+from . import lfm3, lfm3_omni, lfm3_vl, llama, sensenova_loop, spark2_5
 from .base import (
     AUDIO,
     EMBEDDINGS,
@@ -43,6 +44,7 @@ ARCHITECTURES: dict[str, Architecture] = {
         lfm3_omni.ARCHITECTURE,
         lfm3_vl.ARCHITECTURE,
         llama.ARCHITECTURE,
+        sensenova_loop.ARCHITECTURE,
         spark2_5.ARCHITECTURE,
     )
 }

@@ -16,7 +16,9 @@ vocabulary is never materialized for the whole sequence (docs/07-usage/08-limita
 
 Packing (`max_tokens > 0`): sequences of one group are concatenated into rows without
 padding; `position_ids` restart from 0 for each sequence, so attention and the LFM3
-convolution window do not cross document boundaries. The unpacked path (`max_tokens = 0`)
+convolution window do not cross document boundaries. SenseNova-Loop
+(`trener.architectures.sensenova_loop`) runs a packed row as one forward per document: its linear
+attention does not read the document lengths. The unpacked path (`max_tokens = 0`)
 remains the reference.
 
 Media (`trener.media`): a sequence may carry images, audio clips and speech frames. A row with
@@ -43,6 +45,7 @@ from typing import TYPE_CHECKING, Any
 import torch
 from torch.utils.checkpoint import checkpoint
 
+from .architectures import architecture_of
 from .attention import DOCUMENTS_KWARG
 from .head import fused_head_applies, fused_logprobs
 from .media import Media, has_media, media_embeds
@@ -234,6 +237,14 @@ class StreamPacker:
         return rows
 
 
+def _base_extra(policy: Policy, input_ids: torch.Tensor, media: Sequence[Media | None]) -> dict[str, Any]:
+    """Architecture-specific kwargs of the base forward (`Architecture.base_extra`); empty — none."""
+    builder = architecture_of(policy.model).base_extra
+    if builder is None:
+        return {}
+    return builder(policy.model, input_ids, media)
+
+
 def _model_inputs(policy: Policy, input_ids: torch.Tensor, media: Sequence[Media | None]) -> dict[str, Any]:
     """Inputs of the base model: `input_ids`, or `inputs_embeds` with the media when the rows carry any."""
     if not has_media(media):
@@ -404,8 +415,11 @@ def score_sequences(
         # fp32 logits over the whole vocabulary.
         context = torch.enable_grad() if grad else torch.no_grad()
         with context:
-            inputs = _model_inputs(policy, input_ids, [entries[index] for index in indices])
-            outputs = base(**inputs, attention_mask=attention_mask, use_cache=False)
+            row_media = [entries[index] for index in indices]
+            inputs = _model_inputs(policy, input_ids, row_media)
+            outputs = base(
+                **inputs, **_base_extra(policy, input_ids, row_media), attention_mask=attention_mask, use_cache=False
+            )
             hidden_states = outputs.last_hidden_state
             if speech is not None and frames:
                 _score_speech(
@@ -535,7 +549,13 @@ def _score_packed(
                 inputs = _model_inputs(policy, input_ids, row_media)
                 taking = cache.capture(keys, documents) if cache is not None else nullcontext()
                 with taking:
-                    outputs = base(**inputs, position_ids=positions, use_cache=False, **{DOCUMENTS_KWARG: documents})
+                    outputs = base(
+                        **inputs,
+                        **_base_extra(policy, input_ids, row_media),
+                        position_ids=positions,
+                        use_cache=False,
+                        **{DOCUMENTS_KWARG: documents},
+                    )
             hidden_states = outputs.last_hidden_state[0]
             if speech is not None and frames:
                 _score_speech(

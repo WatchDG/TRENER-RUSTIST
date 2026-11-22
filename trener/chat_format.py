@@ -79,10 +79,18 @@ def align_eos(tokenizer: Any) -> Any:
 
 
 def load_tokenizer(path: str | Path, *, trust_remote_code: bool = False) -> Any:
-    """The model's tokenizer as the pipeline uses it: `AutoTokenizer` with the end of a turn as EOS (`align_eos`)."""
+    """The model's tokenizer as the pipeline uses it: `AutoTokenizer` with the end of a turn as EOS (`align_eos`).
+
+    Arguments of `from_pretrained` that belong to the architecture (`Architecture.tokenizer_kwargs`, for example
+    `fix_mistral_regex` of SenseNova-Loop) are passed when the checkpoint has a `config.json`.
+    """
     from transformers import AutoTokenizer
 
-    return align_eos(AutoTokenizer.from_pretrained(str(path), trust_remote_code=trust_remote_code))
+    from .architectures import read_architecture
+
+    path = Path(path)
+    extra = dict(read_architecture(path).tokenizer_kwargs) if (path / "config.json").is_file() else {}
+    return align_eos(AutoTokenizer.from_pretrained(str(path), trust_remote_code=trust_remote_code, **extra))
 
 
 __all__ = ["NO_THINKING", "align_eos", "end_of_turn", "load_tokenizer", "thinking_end"]

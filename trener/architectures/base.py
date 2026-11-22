@@ -1,7 +1,8 @@
 """Description of a model architecture: what the pipeline does differently for it.
 
 An architecture is named by the `architectures` field of the model's `config.json` (`Lfm3ForCausalLM`,
-`Lfm3VlForConditionalGeneration`, `Lfm3OmniForConditionalGeneration`, `Spark2_5ForCausalLM`, `LlamaForCausalLM`). Its
+`Lfm3VlForConditionalGeneration`, `Lfm3OmniForConditionalGeneration`, `Spark2_5ForCausalLM`, `LlamaForCausalLM`,
+`SenseNovaLoopForConditionalGeneration`). Its
 description holds everything that differs between architectures: how the model is built, where its decoder layers
 are, which modules of a decoder layer write into the residual stream (abliteration, `trener.abliteration`), which
 groups of modules can be trained separately (`model.trainable`, `lora.modules`) and how the model turns media into
@@ -187,6 +188,17 @@ class Architecture:
     text_stop: Callable[[Any], tuple[int, ...]] | None = None
     #: Extra arguments of the model's own `generate` for a text answer (the `hf` engine).
     hf_generate_kwargs: dict[str, Any] = field(default_factory=dict)
+    #: Called on the loaded model (wrappers that the checkpoint's own forward does not have).
+    prepare: Callable[[Any], None] | None = None
+    #: `(model, input_ids, media) -> kwargs` added to the base forward (mRoPE for images); `None` — nothing.
+    base_extra: Callable[..., dict[str, Any]] | None = None
+    #: Image positions are multimodal RoPE: `generate` needs `mm_token_type_ids` next to `image_grid_thw`.
+    mrope: bool = False
+    #: Extra arguments of `AutoTokenizer.from_pretrained` for this checkpoint.
+    tokenizer_kwargs: dict[str, Any] = field(default_factory=dict)
+    #: `(model, hidden) -> hidden` in the width the output projections write (`mean_residuals`); `None` — the
+    #: layer output is already that width.
+    residual: Callable[..., torch.Tensor] | None = None
 
     @property
     def native(self) -> bool:
@@ -319,13 +331,17 @@ class Architecture:
         The pipeline's own implementation does not run the checkpoint's code, so `trust_remote_code` is not used.
         """
         if self.model_class is not None:
-            return self.model_class.from_pretrained(str(path), dtype=dtype, attn_implementation=attn_implementation)
-        return self.auto_class.from_pretrained(
-            str(path),
-            dtype=dtype,
-            trust_remote_code=trust_remote_code,
-            attn_implementation=attn_implementation,
-        )
+            model = self.model_class.from_pretrained(str(path), dtype=dtype, attn_implementation=attn_implementation)
+        else:
+            model = self.auto_class.from_pretrained(
+                str(path),
+                dtype=dtype,
+                trust_remote_code=trust_remote_code,
+                attn_implementation=attn_implementation,
+            )
+        if self.prepare is not None:
+            self.prepare(model)
+        return model
 
 
 #: Architectures without their own description: `AutoModelForCausalLM` and the Llama module names.

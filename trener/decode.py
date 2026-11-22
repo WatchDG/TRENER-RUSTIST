@@ -23,9 +23,12 @@ assembly of masks). Here:
   and trains on the finished trajectories (`rollout.overlap`).
 
 Models with full attention (Llama-like) and hybrids in the LFM3 style
-(`layer_types`: `conv` / `full_attention` / `sliding_attention`) are supported, and so are LFM3-VL
-and LFM3-Omni: a prompt with media is prefilled from `inputs_embeds` (`trener.media`), the decode
-steps are text tokens as for any model. A model with speech never samples its mode switches and
+(`layer_types`: `conv` / `full_attention` / `sliding_attention` / `linear_attention`) are supported, and so are
+LFM3-VL, LFM3-Omni and SenseNova-Loop. Linear attention keeps a conv state and a recurrent state
+(`LinearAttentionLayer`); SenseNova-Loop's cache has one slot per visit of the loop plan and is a
+`DynamicCache`, so the checkpoint's forward accepts it. A prompt with media is prefilled from `inputs_embeds`
+(`trener.media`); the decode steps are text tokens as for any model. The decode-step CUDA graph may fail to capture
+the linear-attention conv update and then runs eagerly. A model with speech never samples its mode switches and
 placeholders in a text answer (`Policy.text_bias`, a static bias added to the logits). For sliding
 layers the ring buffer must be filled by the start of decoding, so the prompt is left-padded
 to a length not shorter than the window. `repetition_penalty ≠ 1` is not supported
@@ -46,7 +49,13 @@ from typing import TYPE_CHECKING, Any
 
 import torch
 from transformers import StaticCache
-from transformers.cache_utils import StaticSlidingWindowLayer
+from transformers.cache_utils import (
+    STATIC_LAYER_TYPE_MAPPING,
+    Cache,
+    DynamicCache,
+    StaticSlidingWindowLayer,
+    get_layer_types_and_kwargs,
+)
 
 from .media import Media, has_media, media_embeds
 
@@ -102,9 +111,44 @@ class _RingLayer(StaticSlidingWindowLayer):
         return super().update(key_states, value_states, *args, **kwargs)
 
 
-def _make_cache(config: Any, cache_len: int, slot: torch.Tensor | None = None) -> StaticCache:
-    """`StaticCache` with ring layers suitable for a graph (`slot` — the write index of the decode step)."""
-    cache = StaticCache(config=config, max_cache_len=cache_len)
+class HybridStaticCache(DynamicCache):
+    """Static KV and linear-attention buffers that still pass `isinstance(..., DynamicCache)`.
+
+    SenseNova-Loop accepts only a `DynamicCache` and writes each visit of the loop into its own slot. The layers are
+    the static ones (`StaticLayer`, `LinearAttentionLayer`): a decode step updates them in place.
+    """
+
+    def __init__(self, config: Any, max_cache_len: int, plan: tuple[int, ...]) -> None:
+        text = config.get_text_config(decoder=True)
+        layer_types, per_layer_kwargs = get_layer_types_and_kwargs(text)
+        layers = [
+            STATIC_LAYER_TYPE_MAPPING[layer_type](max_cache_len=max_cache_len, **layer_kwargs)
+            for layer_type, layer_kwargs in zip(layer_types, per_layer_kwargs, strict=True)
+        ]
+        Cache.__init__(self, layers=layers)
+        # The checkpoint keeps this cache only when the plan matches (`!=` on the tuples).
+        self._loop_execution_plan = plan
+
+
+def _language_model(model: Any) -> Any:
+    """The decoder of `model` (`model.language_model` of a multimodal model, otherwise `model.model`)."""
+    inner = getattr(model, "model", None)
+    language = getattr(inner, "language_model", None) if inner is not None else None
+    return language if language is not None else inner
+
+
+def _make_cache(config: Any, cache_len: int, slot: torch.Tensor | None = None, *, model: Any = None) -> Any:
+    """Static cache for `config`. A looped model gets one slot per visit (`HybridStaticCache`).
+
+    Sliding layers become ring layers suitable for a graph (`slot` — the write index of the decode step).
+    """
+    language = _language_model(model) if model is not None else None
+    plan = getattr(language, "_loop_plan", None)
+    loop_config = getattr(language, "_loop_cache_config", None)
+    if plan is not None and loop_config is not None:
+        cache: Any = HybridStaticCache(loop_config, cache_len, tuple(plan))
+    else:
+        cache = StaticCache(config=config, max_cache_len=cache_len)
     for layer in cache.layers:
         if type(layer) is StaticSlidingWindowLayer:
             layer.__class__ = _RingLayer
@@ -240,10 +284,10 @@ class StaticDecoder:
         types = self._layer_types()
         if types is None:
             return False
-        unsupported = set(types) - {"conv", "full_attention", "sliding_attention"}
+        unsupported = set(types) - {"conv", "full_attention", "sliding_attention", "linear_attention"}
         if unsupported:
             raise ValueError(f"the static engine does not support layer types {sorted(unsupported)}")
-        return bool(set(types) & {"conv", "sliding_attention"})
+        return bool(set(types) & {"conv", "sliding_attention", "linear_attention"})
 
     # ------------------------------------------------------------- generation
 
@@ -369,7 +413,7 @@ class StaticDecoder:
             batch=batch,
             cache_len=cache_len,
             max_new=max_new,
-            cache=_make_cache(self.policy.model.config, cache_len, slot),
+            cache=_make_cache(self.policy.model.config, cache_len, slot, model=self.policy.model),
             token=torch.zeros((batch, 1), dtype=torch.long, device=device),
             position=torch.zeros((batch, 1), dtype=torch.long, device=device),
             cur=torch.zeros((), dtype=torch.long, device=device),
@@ -402,6 +446,9 @@ class StaticDecoder:
         if not self._hybrid_masks:
             return convert(full)
         masks: dict[str, torch.Tensor | None] = {"full_attention": convert(full), "conv": None}
+        # Linear attention multiplies a 2D padding mask. The decode token is real, so it needs no mask.
+        if "linear_attention" in (self._layer_types() or []):
+            masks["linear_attention"] = None
         if self._window:
             # slot `i` holds the last position `p ≤ cur` written into it, `p ≡ origin + i (mod W)`
             slots = torch.arange(self._window, device=device)
@@ -434,6 +481,11 @@ class StaticDecoder:
             if self.policy.media is None:
                 raise ValueError("the prompts carry media, but the model takes none")
             inputs = {"inputs_embeds": media_embeds(self.policy.model, self.policy.media, input_ids, media)}
+            from .architectures import architecture_of
+
+            extra = architecture_of(self.policy.model).base_extra
+            if extra is not None:
+                inputs.update(extra(self.policy.model, input_ids, media))
         outputs = self.policy.model(
             **inputs,
             attention_mask=mask,
@@ -758,11 +810,12 @@ def _cache_state(cache: Any) -> list[dict[str, Any]]:
                 entry[name] = tensor.clone()
         if hasattr(layer, "cumulative_length_int"):
             entry["cumulative_length_int"] = layer.cumulative_length_int
-        conv_states = getattr(layer, "conv_states", None)
-        if isinstance(conv_states, dict):
-            entry["conv_states"] = {
-                index: value.clone() for index, value in conv_states.items() if isinstance(value, torch.Tensor)
-            }
+        for bucket in ("conv_states", "recurrent_states"):
+            states = getattr(layer, bucket, None)
+            if isinstance(states, dict):
+                entry[bucket] = {
+                    index: value.clone() for index, value in states.items() if isinstance(value, torch.Tensor)
+                }
         has_previous = getattr(layer, "has_previous_state", None)
         if isinstance(has_previous, dict):
             entry["has_previous_state"] = dict(has_previous)
@@ -778,8 +831,9 @@ def _restore_cache(cache: Any, state: list[dict[str, Any]]) -> None:
                 getattr(layer, name).copy_(entry[name])
         if "cumulative_length_int" in entry:
             layer.cumulative_length_int = entry["cumulative_length_int"]
-        for index, value in entry.get("conv_states", {}).items():
-            layer.conv_states[index].copy_(value)
+        for bucket in ("conv_states", "recurrent_states"):
+            for index, value in entry.get(bucket, {}).items():
+                getattr(layer, bucket)[index].copy_(value)
         if "has_previous_state" in entry:
             layer.has_previous_state.update(entry["has_previous_state"])
 
@@ -795,4 +849,11 @@ def get_decoder(policy: Policy, cfg: RolloutConfig) -> StaticDecoder:
     return decoder
 
 
-__all__ = ["DecodeResult", "DecodeSession", "StaticDecoder", "get_decoder", "sample_tokens"]
+__all__ = [
+    "DecodeResult",
+    "DecodeSession",
+    "HybridStaticCache",
+    "StaticDecoder",
+    "get_decoder",
+    "sample_tokens",
+]

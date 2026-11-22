@@ -263,7 +263,7 @@ def generate_roles(
                             input_ids=input_ids,
                             attention_mask=attention_mask,
                             generation_config=generation_config,
-                            **_media_inputs(policy, chunk_media),
+                            **_media_inputs(policy, chunk_media, input_ids),
                             **architecture_of(policy.model).hf_generate_kwargs,
                         )
 
@@ -383,7 +383,9 @@ def _single_turn(
     )
 
 
-def _media_inputs(policy: Policy, media: Sequence[Media | None]) -> dict[str, torch.Tensor]:
+def _media_inputs(
+    policy: Policy, media: Sequence[Media | None], input_ids: torch.Tensor | None = None
+) -> dict[str, torch.Tensor]:
     """Media arguments of the model's own `generate` for the rows of a batch (row by row)."""
     if not has_media(media):
         return {}
@@ -395,6 +397,12 @@ def _media_inputs(policy: Policy, media: Sequence[Media | None]) -> dict[str, to
     if images and encoder.images is not None:
         pixel_values, grid = encoder.images.pixels(images)
         inputs |= {"pixel_values": pixel_values.to(policy.device), "image_grid_thw": grid.to(policy.device)}
+        if input_ids is not None and architecture_of(policy.model).mrope:
+            from .architectures.sensenova_loop import mm_token_type_ids
+
+            types = mm_token_type_ids(policy.model.config, input_ids)
+            if types is not None:
+                inputs["mm_token_type_ids"] = types
     clips = [ref for entry in media if entry is not None for ref in entry.audio]
     if clips and encoder.audio is not None:
         features, mask = encoder.audio.features(clips)

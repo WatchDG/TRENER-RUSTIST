@@ -8,9 +8,25 @@ from typing import Any
 
 import pytest
 import torch
-from transformers import LlamaConfig, LlamaForCausalLM, TemperatureLogitsWarper, TopKLogitsWarper, TopPLogitsWarper
+from transformers import (
+    DynamicCache,
+    LlamaConfig,
+    LlamaForCausalLM,
+    Qwen3_5TextConfig,
+    TemperatureLogitsWarper,
+    TopKLogitsWarper,
+    TopPLogitsWarper,
+)
 from trener.config import RolloutConfig
-from trener.decode import StaticDecoder, get_decoder, sample_tokens
+from trener.decode import (
+    HybridStaticCache,
+    StaticDecoder,
+    _cache_state,
+    _make_cache,
+    _restore_cache,
+    get_decoder,
+    sample_tokens,
+)
 from trener.modeling import build_policy
 from trener.prompts import build_prompts
 from trener.rollout import STUDENT, TEACHER, _trim_completion, generate, generate_roles
@@ -432,3 +448,67 @@ def test_ring_graph_matches_eager_over_many_wraps(kind: str, tokenizer: Any, req
         assert result.stats["graph"] is graphs
         results[graphs] = result.completions
     assert results[True] == results[False]
+
+
+class _LayerModel(torch.nn.Module):
+    """A stand-in whose config only carries `layer_types`."""
+
+    def __init__(self, types: list[str] | None) -> None:
+        super().__init__()
+        self.scale = torch.nn.Parameter(torch.zeros(()))
+        self.config = SimpleNamespace(layer_types=types, _attn_implementation="sdpa")
+        self.model = SimpleNamespace()
+
+
+def test_linear_attention_uses_a_mask_dict() -> None:
+    policy = SimpleNamespace(model=_LayerModel(["linear_attention", "full_attention", "linear_attention"]))
+    decoder = StaticDecoder(policy, _rollout_config("static"))
+    assert decoder._hybrid_masks
+    runner = SimpleNamespace(
+        cur=torch.tensor(3),
+        cache_len=8,
+        prompt_mask=torch.ones(1, 8, dtype=torch.bool),
+        origin=torch.tensor(0),
+    )
+    masks = decoder._attention_masks(runner)  # type: ignore[arg-type]
+    assert set(masks) >= {"full_attention", "linear_attention"}
+    assert masks["linear_attention"] is None
+    assert masks["full_attention"].dtype == torch.bool
+    assert masks["full_attention"].shape[-1] == 8
+
+
+def test_static_engine_rejects_an_unknown_layer_type() -> None:
+    policy = SimpleNamespace(model=_LayerModel(["moe"]))
+    with pytest.raises(ValueError, match="moe"):
+        StaticDecoder(policy, _rollout_config("static"))
+
+
+def test_loop_cache_has_one_slot_per_visit_and_restores_recurrent_state() -> None:
+    types = ["linear_attention", "linear_attention", "full_attention", "full_attention"]
+    text = Qwen3_5TextConfig(num_hidden_layers=4, layer_types=types, hidden_size=32, vocab_size=32)
+    plan = (0, 1, 2, 3, 2, 3)
+    loop = text.__class__(**text.to_dict())
+    loop.num_hidden_layers = len(plan)
+    loop.layer_types = [types[index] for index in plan]
+    language = SimpleNamespace(_loop_plan=plan, _loop_cache_config=loop)
+    model = SimpleNamespace(config=text, model=SimpleNamespace(language_model=language))
+    cache = _make_cache(text, 16, model=model)
+    assert isinstance(cache, DynamicCache)
+    assert isinstance(cache, HybridStaticCache)
+    assert len(cache.layers) == len(plan)
+    assert cache._loop_execution_plan == plan
+    layer = cache.layers[0]
+    layer.lazy_initialization(
+        conv_states=torch.zeros(1, 4, 4), recurrent_states=torch.zeros(1, 2, 2, 2)
+    )
+    layer.has_previous_state[0] = True
+    layer.conv_states[0].fill_(1)
+    layer.recurrent_states[0].fill_(2)
+    saved = _cache_state(cache)
+    layer.conv_states[0].fill_(0)
+    layer.recurrent_states[0].fill_(0)
+    layer.has_previous_state[0] = False
+    _restore_cache(cache, saved)
+    assert torch.equal(layer.conv_states[0], torch.ones_like(layer.conv_states[0]))
+    assert torch.equal(layer.recurrent_states[0], torch.full_like(layer.recurrent_states[0], 2))
+    assert layer.has_previous_state[0] is True

@@ -117,7 +117,7 @@ def _generate_many(
             generation_mode=mode,
             do_sample=False,
             return_dict_in_generate=True,
-            **_media_inputs(policy, [medias[i] for i in rows]),
+            **_media_inputs(policy, [medias[i] for i in rows], input_ids),
         )
         for position, index in enumerate(rows):
             if mode == "audio":

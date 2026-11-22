@@ -147,11 +147,13 @@ def mean_residuals(policy: Policy, prompts: Sequence[Sequence[int]], batch_size:
     """Mean activation at the last prompt token, `(N + 1, d)` fp32 on the CPU.
 
     Level 0 is the embedding output, level `k` the output of layer `k − 1`, all before the final norm.
-    The sums are accumulated in fp64.
+    The sums are accumulated in fp64. `Architecture.residual` maps a layer output into the width the projections
+    write (SenseNova-Loop averages mHC streams); a looped layer keeps its last visit.
     """
     if not prompts:
         raise ValueError("no prompts for the mean activations")
     base = _base_model(policy)
+    project = architecture_of(policy.model).residual
     modules = [base.get_input_embeddings(), *decoder_layers(policy.model)]
     state: dict[str, Any] = {}
     captured: list[torch.Tensor | None] = [None] * len(modules)
@@ -159,6 +161,8 @@ def mean_residuals(policy: Policy, prompts: Sequence[Sequence[int]], batch_size:
     def store(level: int) -> Any:
         def hook(_module: Any, _inputs: Any, output: Any) -> None:
             hidden = output[0] if isinstance(output, tuple) else output
+            if project is not None:
+                hidden = project(policy.model, hidden)
             captured[level] = hidden[state["rows"], state["last"]].double()
 
         return hook
