@@ -41,7 +41,9 @@ Gemma 4 E2B goes to `models/Gemma-4-E2B-it` ([google/gemma-4-E2B-it](https://hug
 runs on it with `--set model.path=models/Gemma-4-E2B-it`. The weights are about 10 GB in bf16 (the 262 144-token
 embedding and the per-layer embedding table). `model.trust_remote_code` is not needed. Images use the checkpoint's
 soft-token budget (280 unless `model.image_max_tokens` is 70, 140, 280, 560 or 1120); audio is one token per 40 ms.
-Video is not supported. The prefix cache does not resume this model.
+Video is not supported. The prefix cache does not resume this model. `model.attn_overrides` keys `text`, `video`
+and `audio` are optional and a missing key keeps `model.attn_implementation`; the presets set only `audio: eager`,
+because that tower does not implement sdpa, and `video` selects the vision tower shared with images.
 
 ```powershell
 .venv\Scripts\python.exe -c "from huggingface_hub import snapshot_download; snapshot_download('google/gemma-4-E2B-it', local_dir='models/Gemma-4-E2B-it')"

@@ -257,3 +257,66 @@ def test_image_and_audio_token_counts(name: str, tmp_path: Path) -> None:
     assert clip.n_tokens == expected
     features, mask = audio.features(audio.describe([wave]))
     assert features.shape[0] == 1 and int(mask.sum()) == clip.frames
+
+
+_GEMMA_CONFIGS = (
+    "configs/abliterate_gemma4_en0001.yaml",
+    "configs/abliterate_gemma4_ru0001.yaml",
+    "configs/smoke/smoke_sft_gemma4.yaml",
+    "configs/smoke/smoke_abliterate_gemma4.yaml",
+    "configs/smoke/smoke_sft_gemma4_e4b.yaml",
+    "configs/smoke/smoke_abliterate_gemma4_e4b.yaml",
+)
+
+
+def test_attn_overrides_leave_text_and_video_on_sdpa() -> None:
+    """Only `audio: eager` is set. Text and the vision tower (images and video) stay on sdpa."""
+    from transformers import Gemma4AudioConfig, Gemma4ForConditionalGeneration, Gemma4VisionConfig
+
+    from trener.architectures import GENERIC
+    from trener.config import load_config
+
+    architecture = get_architecture("Gemma4ForConditionalGeneration")
+    assert architecture.attention_implementation("sdpa") == "sdpa"
+    assert architecture.attention_implementation("eager", {}) == "eager"
+    with pytest.raises(ValueError, match="image"):
+        architecture.attention_implementation("sdpa", {"image": "eager"})
+    with pytest.raises(ValueError, match="no attention sub-configs"):
+        GENERIC.attention_implementation("sdpa", {"audio": "eager"})
+
+    spec = architecture.attention_implementation("sdpa", {"audio": "eager"})
+    assert spec == {
+        "": "sdpa",
+        "text_config": "sdpa",
+        "vision_config": "sdpa",
+        "audio_config": "eager",
+    }
+    config = _tiny_config()
+    config.vision_config = Gemma4VisionConfig(
+        hidden_size=32,
+        intermediate_size=64,
+        num_hidden_layers=1,
+        num_attention_heads=4,
+        num_key_value_heads=4,
+        head_dim=8,
+        patch_size=4,
+        position_embedding_size=8,
+    )
+    config.audio_config = Gemma4AudioConfig(
+        hidden_size=32,
+        num_hidden_layers=1,
+        num_attention_heads=4,
+        output_proj_dims=8,
+        subsampling_conv_channels=[8, 8],
+    )
+    config._attn_implementation = spec
+    install_kv_projections()
+    model = Gemma4ForConditionalGeneration(config)
+    assert model.model.language_model.config._attn_implementation == "sdpa"
+    assert model.model.vision_tower.config._attn_implementation == "sdpa"
+    assert model.model.audio_tower.config._attn_implementation == "eager"
+
+    for path in _GEMMA_CONFIGS:
+        loaded = load_config(ROOT / path)
+        assert loaded.model.attn_implementation == "sdpa"
+        assert loaded.model.attn_overrides == {"audio": "eager"}

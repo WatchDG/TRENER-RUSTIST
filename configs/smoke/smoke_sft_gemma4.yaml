@@ -13,6 +13,8 @@ model:
   dtype: bfloat16
   trust_remote_code: false
   attn_implementation: sdpa
+  attn_overrides:
+    audio: eager
   gradient_checkpointing: true
   compile_kernels: false
   trainable: [language]

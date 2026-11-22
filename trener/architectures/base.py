@@ -16,7 +16,7 @@ encoder and its projector: hearing) and `voice` (the speech-frame embeddings and
 from __future__ import annotations
 
 import re
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -214,6 +214,9 @@ class Architecture:
     build_audio: Callable[..., Any] | None = None
     #: `(encoder, kind, n) -> token ids` that replace one media placeholder (`image`, `audio`); `None` — `n` copies.
     placeholder: Callable[..., list[int]] | None = None
+    #: `model.attn_overrides` key → sub-config attribute (`text` → `text_config`). Empty — the architecture has one
+    #: attention config, and overrides are an error.
+    attn_subconfigs: dict[str, str] = field(default_factory=dict)
 
     @property
     def native(self) -> bool:
@@ -340,11 +343,45 @@ class Architecture:
                 names.add(name)
         return names
 
-    def load(self, path: Path, *, dtype: torch.dtype, attn_implementation: str, trust_remote_code: bool) -> Any:
+    def attention_implementation(
+        self, implementation: str, overrides: Mapping[str, str] | None = None
+    ) -> str | dict[str, str]:
+        """Value of `attn_implementation` for `from_pretrained`.
+
+        An empty `overrides` keeps the string. Otherwise every sub-config gets `implementation`, and a present key
+        replaces its own. A missing key keeps `implementation`.
+        """
+        chosen = dict(overrides or {})
+        if not chosen:
+            return implementation
+        if not self.attn_subconfigs:
+            raise ValueError(
+                f"model.attn_overrides {sorted(chosen)}: {self.name or 'the model'} has no attention sub-configs"
+            )
+        unknown = sorted(set(chosen) - set(self.attn_subconfigs))
+        if unknown:
+            raise ValueError(
+                f"model.attn_overrides: unknown key(s) {unknown}; available: {list(self.attn_subconfigs)}"
+            )
+        spec = {"": implementation}
+        for key, subconfig in self.attn_subconfigs.items():
+            spec[subconfig] = chosen.get(key, implementation)
+        return spec
+
+    def load(
+        self,
+        path: Path,
+        *,
+        dtype: torch.dtype,
+        attn_implementation: str,
+        trust_remote_code: bool,
+        attn_overrides: Mapping[str, str] | None = None,
+    ) -> Any:
         """The model from the checkpoint directory `path`.
 
         The pipeline's own implementation does not run the checkpoint's code, so `trust_remote_code` is not used.
         """
+        attn_implementation = self.attention_implementation(attn_implementation, attn_overrides)
         if self.before_load is not None:
             self.before_load()
         if self.model_class is not None:

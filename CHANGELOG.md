@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-11-22
+
+### Added
+
+- `model.attn_overrides` (`text`, `video`, `audio`; each optional, a missing key keeps `model.attn_implementation`).
+  Gemma 4 maps them to `text_config`, `vision_config` and `audio_config` (`Architecture.attn_subconfigs`,
+  `Architecture.attention_implementation`); images and video frames share the vision tower. An unknown key, or any
+  key on an architecture without sub-configs, is an error. The Gemma 4 presets set only `audio: eager` and leave the
+  language model and the vision tower on `sdpa` (the audio tower does not implement sdpa). The overrides are a part
+  of the run's snapshot and of the prefix cache key (`trener/config.py`, `trener/prefix_cache.py`), and
+  `configs/abliterate_gemma4_ru0001.yaml` and the presets no longer set `attn_implementation: eager` globally.
+- `abliteration.eval_filter` (default `true`, `trener/abliteration.py`, `docs/10-abliteration.md` §4.6): the base
+  model defines the informative eval prompts before the study — `bad` prompts it refuses and `good` prompts it
+  answers. A `bad` prompt the base already answers cannot show a removed refusal, and a `good` prompt that is itself
+  a refusal (the translated sets carry "Topic: …" suffixes the model refuses) turns the KL objective into a defence
+  of the refusal. `eval/filter.json` keeps the counts and the ids of the dropped prompts, `eval/baseline.json` the
+  answers of the full split; an empty side stops the run with a configuration error. The value is a setting of the
+  study, so a repeated run with another value is refused. `Evaluator` generates the `good` answers when the filter
+  runs, and `TrialEval.good_refusals` records their refusal flags.
+- `configs/abliterate_gemma4_en0001.yaml` (Gemma 4 E2B on the English set `abliteration-en-0001`) and
+  `configs/abliterate_lfm3_en0001.yaml` (LFM3-1.7B on the same set), presets next to `configs/abliterate_lfm3.yaml`.
+- `scripts/eval_filtered_test.py`: re-applies an exported study's parameters through `Ablator` and measures the
+  refusal rate and the first-token KL on the kept and the dropped eval prompts, so the effect of the filter is
+  visible without reading the exported checkpoint.
+
+### Changed
+
+- **Breaking:** the smoke presets moved to `configs/smoke/` (`configs/smoke_tutor_rust_jolt.yaml` →
+  `configs/smoke/smoke_tutor_rust_jolt.yaml`, and so for the other 16): a config path in a script or a command line
+  changes with them. README, `docs/07-usage/03-presets.md` and the other pages,
+  `datasets/rust-vision/rust-code-output-0001` and the tests that load a preset follow the new layout.
+
+### Fixed
+
+- The static decode engine built a boolean decode mask whatever the attention implementation of the model:
+  `_attention_masks` now reads `text_config` when it has its own `_attn_implementation`, so a model whose language
+  model is eager (`model.attn_overrides: {text: eager}`) gets the additive mask (`trener/decode.py`).
+
 ## [0.18.0] - 2026-11-22
 
 ### Added
@@ -478,7 +516,8 @@ First release.
 - Tests that need the LFM3 tokenizer are skipped when `models/LFM3-1.7B` is
   absent instead of failing.
 
-[Unreleased]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.18.0...HEAD
+[Unreleased]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.19.0...HEAD
+[0.19.0]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.18.0...v0.19.0
 [0.18.0]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/WatchDG/TRENER-RUSTIST/compare/v0.15.0...v0.16.0

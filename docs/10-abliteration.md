@@ -42,6 +42,7 @@ abliteration:
 | `direction_split` | `train` | split the refusal direction is computed on |
 | `eval_split` | `test` | split the trials are evaluated on: refusal rate on `bad`, KL on `good` |
 | `eval_limit` | `100` | at most this many `bad` and this many `good` prompts of `eval_split` (chosen by `run.seed`) |
+| `eval_filter` | `true` | keep only `bad` prompts the base model refuses and `good` prompts it answers (§4.6) |
 | `system_prompt` | `""` | system prompt of every prompt; empty — the set's `system_prompt`, if any, else none |
 | `enable_thinking` | `false` | `enable_thinking` of the chat template: `false` ends the generation prompt with `<think></think>`, so a refusal shows in the first tokens; `true` ends it with `<think>` |
 | `max_new_tokens` | `100` | answer length for the refusal check |
@@ -215,15 +216,28 @@ objectives; the result is a Pareto front. The search space, with `L = N − 1` t
 The study lives in `runs/<name>/optuna.jsonl`. A repeated run with the same `run.name` loads it, adds trials up to
 `n_trials` (none, if they are already there) and exports the chosen trial again; to search further, raise
 `n_trials`. The study records the settings its trials depend on (model, prompts, `system_prompt`,
-`enable_thinking`, splits, `eval_limit`, `max_new_tokens`, `orthogonalize_direction`, `row_normalization`,
-markers, seed): a run with other values is refused — change `run.name`. `Ctrl+C` stops the search after marking the
-current trial failed; nothing is exported, the next run continues.
+`enable_thinking`, splits, `eval_limit`, `eval_filter`, `max_new_tokens`, `orthogonalize_direction`,
+`row_normalization`, markers, seed): a run with other values is refused — change `run.name`. `Ctrl+C` stops the
+search after marking the current trial failed; nothing is exported, the next run continues.
 
 ### 4.5 Choosing the trial
 
 Among the Pareto trials with `KL ≤ max_kl` the one with the lowest refusal rate (ties — lower KL); without such
 trials, the one with the lowest KL. `abliteration.trial: <number>` exports a given trial instead: the numbers and
 objectives of the front are in `pareto.json` and `summary.md`.
+
+### 4.6 The eval filter
+
+With `eval_filter: true` (the default) the base model defines the informative eval prompts before the study:
+`bad` prompts it refuses and `good` prompts it answers. A `bad` prompt the base already answers cannot show a
+removed refusal — it only dilutes the objective; a `good` prompt that is itself a refusal (translated sets often
+carry "Topic: …" suffixes the model refuses) turns the KL objective into a defence of the refusal behaviour.
+The filter drops both; `eval/filter.json` keeps the counts and the ids of the dropped prompts, `eval/baseline.json`
+the answers of the full split before the filter. When the filter leaves nothing on one side
+(`bad kept 0/n`), the run stops with a configuration error: choose another split or set `eval_filter: false`.
+
+The filter is a setting of the study (`eval/filter.json` marks the run): a repeated run with another value is
+refused, as for the other settings, because the objectives of the trials would not compare.
 
 ## 5. Run directory
 
@@ -236,6 +250,7 @@ runs/<name>/
   metrics.jsonl                # one line per trial (§4.3)
   pareto.json                  # Pareto front: trial, refusal_rate, kl, modules, params
   eval/baseline.json           # base model: refusal rate, every answer to bad with its refusal flag
+  eval/filter.json             # the eval filter: kept counts and dropped ids (§4.6)
   eval/final.json              # the same for the chosen trial
   abliteration.json            # result: trial, params, objectives before/after, settings, paths
   checkpoints/final/           # model.safetensors (bf16, tied lm_head/embed — one tensor) + abliteration.json

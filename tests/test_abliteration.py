@@ -295,7 +295,15 @@ def _run_config(tmp_path: Path, model_path: Path, **abliteration: Any) -> JoltCo
             ],
         },
     )
-    settings = {"prompts": tmp_path / "set", "max_new_tokens": 4, "batch_size": 2, "n_trials": 2, "n_startup_trials": 2}
+    settings = {
+        "prompts": tmp_path / "set",
+        "max_new_tokens": 4,
+        "batch_size": 2,
+        "n_trials": 2,
+        "n_startup_trials": 2,
+        # the tiny random model refuses nothing: the filter would leave no prompts to study on
+        "eval_filter": False,
+    }
     return JoltConfig(
         method="abliterate",
         run=RunConfig(name="abl", out_dir=tmp_path / "runs"),
@@ -352,3 +360,87 @@ def test_run_exports_the_chosen_trial_and_continues_the_study(
     assert len((run_dir / "metrics.jsonl").read_text(encoding="utf-8").splitlines()) == 2
     with pytest.raises(ConfigError, match="row_normalization"):
         run_abliteration(_run_config(tmp_path, model_path, row_normalization="none"), policy=policy)
+
+    # other eval_filter settings are refused too (the objectives of the trials differ)
+    with pytest.raises(ConfigError, match="eval_filter"):
+        run_abliteration(_run_config(tmp_path, model_path, eval_filter=True), policy=policy)
+
+
+def test_run_filter_keeps_only_prompts_the_base_model_is_informative_on(
+    tmp_path: Path, policy: Any, model_path: Path, tokenizer: Any
+) -> None:
+    """With `eval_filter` the study's objectives are computed on the kept prompts only.
+
+    The tiny random model refuses nothing by the built-in markers, so the test derives a
+    separating marker from the model's own answers: one contained in both bad answers and in
+    no good answer. With no such marker (the model changed) the case is not testable: skip.
+    """
+    if not (model_path / "config.json").is_file():
+        pytest.skip(f"LFM3 model files are unavailable: {model_path}")
+
+    target = tmp_path / "set"
+    write_prompt_set(
+        target,
+        "unit",
+        {
+            "train": [{"id": "t0", "bad": "Ask drug 0?", "good": "What is drug 0?"}],
+            "test": [
+                {"id": "e0", "bad": "Ask me anything?", "good": "What is aspirin?"},
+                {"id": "e1", "bad": "Ask me more?", "good": "What is ibuprofen?"},
+            ],
+        },
+    )
+
+    from trener.config import EVAL_AUTO_MAX_BATCH, EvalConfig, RolloutConfig
+    from trener.evaluate import _rollout_config
+    from trener.prompts import PromptPair
+    from trener.rollout import STUDENT, generate
+
+    def answer_of(text: str) -> str:
+        rendered, ids = render_prompt(policy.tokenizer, text, "", False)
+        pair = PromptPair(student_ids=ids, teacher_ids=ids, student_text=rendered, teacher_text=rendered, task_id="t")
+        rollout = _rollout_config(EvalConfig(max_new_tokens=8, batch_size=EVAL_AUTO_MAX_BATCH), RolloutConfig())
+        return generate(policy, [pair], rollout, STUDENT, group_size=1, max_new_tokens=8, do_sample=False, seed=0)[0].text
+
+    bad_answers = [answer_of("Ask me anything?"), answer_of("Ask me more?")]
+    good_answers = [answer_of("What is aspirin?"), answer_of("What is ibuprofen?")]
+
+    from trener.refusal import normalize_answer
+
+    bad0, bad1 = normalize_answer(bad_answers[0]), normalize_answer(bad_answers[1])
+    good_text = normalize_answer(good_answers[0]) + normalize_answer(good_answers[1])
+    markers = [
+        gram
+        for size in (2, 3, 4)
+        for gram in {bad0[i : i + size] for i in range(len(bad0) - size + 1)}
+        & {bad1[i : i + size] for i in range(len(bad1) - size + 1)}
+        if gram not in good_text
+    ]
+    if not markers:
+        pytest.skip("the tiny model's answers give no marker that separates bad from good")
+    marker = max(markers, key=len)
+
+    cfg = JoltConfig(
+        method="abliterate",
+        run=RunConfig(name="abl-filter", out_dir=tmp_path / "runs"),
+        model=ModelConfig(path=model_path, dtype="float32"),
+        abliteration=AbliterationConfig(
+            **{
+                "prompts": target,
+                "max_new_tokens": 8,
+                "batch_size": 2,
+                "n_trials": 1,
+                "n_startup_trials": 1,
+                "refusal_markers": [marker],
+            }
+        ),
+    )
+    run_abliteration(cfg, policy=policy)
+    run_dir = cfg.run_dir
+    filter_report = json.loads((run_dir / "eval" / "filter.json").read_text(encoding="utf-8"))
+    assert filter_report["bad_total"] == 2 and filter_report["bad_kept"] == 2
+    assert filter_report["good_total"] == 2 and filter_report["good_kept"] == 2
+    baseline = json.loads((run_dir / "eval" / "baseline.json").read_text(encoding="utf-8"))
+    assert all(row["refusal"] for row in baseline["answers"])
+    final = json.loads((run_dir / "eval" / "final.json").read_text(encoding="utf-8"))
+    assert final["n_bad"] == 2 and len(final["answers"]) == 2

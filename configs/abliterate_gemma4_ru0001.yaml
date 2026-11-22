@@ -1,5 +1,4 @@
 # Abliteration of Gemma-4-E2B-it on the Russian refusal set abliteration-ru-0001.
-# Gemma4 audio tower needs eager attention; sdpa fails at load time.
 run:
   name: abliterate_gemma4_ru0001_t1000_v2
   seed: 0
@@ -9,7 +8,9 @@ model:
   path: models/Gemma-4-E2B-it
   dtype: bfloat16
   trust_remote_code: false
-  attn_implementation: eager
+  attn_implementation: sdpa
+  attn_overrides:
+    audio: eager
   compile_kernels: false
 rollout:
   engine: static

@@ -135,6 +135,10 @@ class ModelConfig:
     dtype: str = "bfloat16"
     trust_remote_code: bool = True
     attn_implementation: str = "sdpa"
+    #: Attention of a sub-config, by name (`text`, `video`, `audio` for Gemma 4). A missing key keeps
+    #: `attn_implementation`. Empty — the string is passed to `from_pretrained` as it is. `video` is the vision
+    #: tower: images and video frames share it.
+    attn_overrides: dict[str, str] = field(default_factory=dict)
     gradient_checkpointing: bool = True
     #: Fuse RMSNorm, RoPE and MLP via `torch.compile` (`trener.fusion`; requires Triton, CUDA only).
     compile_kernels: bool = False
@@ -188,6 +192,7 @@ class ModelConfig:
             "dtype": self.dtype,
             "trust_remote_code": self.trust_remote_code,
             "attn_implementation": self.attn_implementation,
+            "attn_overrides": dict(self.attn_overrides),
             "gradient_checkpointing": self.gradient_checkpointing,
             "compile_kernels": self.compile_kernels,
             "selective_checkpointing": self.selective_checkpointing,
@@ -515,6 +520,11 @@ class AbliterationConfig:
     eval_split: str = "test"
     #: At most this many `bad` and this many `good` prompts of `eval_split`.
     eval_limit: int = 100
+    #: Filter the eval prompts by the base model's own behaviour: keep only `bad` prompts the base
+    #: refuses and `good` prompts the base answers. A `bad` prompt answered by the base cannot show a
+    #: removed refusal, and a `good` prompt that is itself a refusal (translated sets often carry
+    #: "Topic: …" suffixes the model refuses) turns the KL objective into a defence of the refusal.
+    eval_filter: bool = True
     #: System prompt of every prompt (empty — the set's `system_prompt`, if any, else none).
     system_prompt: str = ""
     #: `enable_thinking` of the chat template: false — the generation prompt ends with an empty think block,
@@ -545,6 +555,7 @@ class AbliterationConfig:
             "direction_split": self.direction_split,
             "eval_split": self.eval_split,
             "eval_limit": self.eval_limit,
+            "eval_filter": self.eval_filter,
             "system_prompt": self.system_prompt,
             "enable_thinking": self.enable_thinking,
             "max_new_tokens": self.max_new_tokens,
@@ -681,6 +692,12 @@ def _coerce_value(where: str, target: Any, value: Any, *, from_text: bool = Fals
     elif target is str:
         if isinstance(value, str):
             return value
+    elif typing.get_origin(target) is dict:
+        key_type, item_type = typing.get_args(target)
+        if isinstance(value, dict) and all(
+            isinstance(key, key_type) and isinstance(item, item_type) for key, item in value.items()
+        ):
+            return dict(value)
     else:  # pragma: no cover - the schema has no other types
         return value
     expected = getattr(target, "__name__", str(target))

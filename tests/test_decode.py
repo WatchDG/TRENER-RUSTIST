@@ -477,6 +477,23 @@ def test_linear_attention_uses_a_mask_dict() -> None:
     assert masks["full_attention"].shape[-1] == 8
 
 
+def test_text_config_eager_uses_an_additive_mask() -> None:
+    """The decode mask follows `text_config` when it differs from the root config."""
+    model = _LayerModel(["full_attention"])
+    model.config.text_config = SimpleNamespace(_attn_implementation="eager")
+    policy = SimpleNamespace(model=model)
+    decoder = StaticDecoder(policy, _rollout_config("static"))
+    runner = SimpleNamespace(
+        cur=torch.tensor(3),
+        cache_len=8,
+        prompt_mask=torch.ones(1, 8, dtype=torch.bool),
+        origin=torch.tensor(0),
+    )
+    mask = decoder._attention_masks(runner)  # type: ignore[arg-type]
+    assert mask.dtype != torch.bool
+    assert mask.shape[-1] == 8
+
+
 def test_static_engine_rejects_an_unknown_layer_type() -> None:
     policy = SimpleNamespace(model=_LayerModel(["moe"]))
     with pytest.raises(ValueError, match="moe"):

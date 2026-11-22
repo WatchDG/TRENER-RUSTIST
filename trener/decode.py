@@ -436,7 +436,11 @@ class StaticDecoder:
         positions = torch.arange(runner.cache_len, device=device)
         full = ((positions <= runner.cur)[None, :] & runner.prompt_mask)[:, None, None, :]
         dtype = next(self.policy.model.parameters()).dtype
-        eager = getattr(self.policy.model.config, "_attn_implementation", "sdpa") == "eager"
+        config = self.policy.model.config
+        text = getattr(config, "text_config", None)
+        if getattr(text, "_attn_implementation", None) is not None:
+            config = text
+        eager = getattr(config, "_attn_implementation", "sdpa") == "eager"
 
         def convert(mask: torch.Tensor) -> torch.Tensor:
             if not eager:

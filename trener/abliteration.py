@@ -30,7 +30,7 @@ import shutil
 import time
 import warnings
 from collections.abc import Sequence
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -366,6 +366,8 @@ class TrialEval:
     refusal_rate: float
     kl: float
     answers: list[str]
+    #: Refusal flag of each `good` answer, in the order of `Evaluator.good`; empty when not kept.
+    good_refusals: list[bool] = field(default_factory=list)
 
 
 class Evaluator:
@@ -378,6 +380,7 @@ class Evaluator:
         bad: Sequence[tuple[str, str, list[int]]],
         good: Sequence[list[int]],
         markers: Sequence[str],
+        keep_good_answers: bool = False,
     ):
         from .evaluate import _rollout_config
         from .prompts import PromptPair
@@ -387,6 +390,8 @@ class Evaluator:
         self.bad = list(bad)
         self.good = list(good)
         self.markers = tuple(markers)
+        #: Generate answers to the `good` prompts too (the baseline eval does, to filter them).
+        self.keep_good_answers = bool(keep_good_answers)
         self.pairs = [
             PromptPair(student_ids=ids, teacher_ids=ids, student_text=rendered, teacher_text=rendered, task_id=name)
             for name, rendered, ids in self.bad
@@ -399,6 +404,8 @@ class Evaluator:
         self.base_logprobs = first_token_logprobs(policy, self.good, section.batch_size)
 
     def __call__(self) -> TrialEval:
+        from .prompts import PromptPair
+        from .refusal import is_refusal
         from .rollout import STUDENT, generate
 
         trajectories = generate(
@@ -413,7 +420,29 @@ class Evaluator:
         )
         answers = [trajectory.text for trajectory in trajectories]
         logprobs = first_token_logprobs(self.policy, self.good, self.cfg.abliteration.batch_size)
-        return TrialEval(refusal_rate(answers, self.markers), kl_first_token(self.base_logprobs, logprobs), answers)
+        good_refusals = []
+        if self.keep_good_answers:
+            good_pairs = [
+                PromptPair(student_ids=ids, teacher_ids=ids, student_text="", teacher_text="", task_id=f"good-{index}")
+                for index, ids in enumerate(self.good)
+            ]
+            good_trajectories = generate(
+                self.policy,
+                good_pairs,
+                self.rollout,
+                STUDENT,
+                group_size=1,
+                max_new_tokens=self.cfg.abliteration.max_new_tokens,
+                do_sample=False,
+                seed=self.cfg.run.seed,
+            )
+            good_refusals = [is_refusal(trajectory.text, self.markers) for trajectory in good_trajectories]
+        return TrialEval(
+            refusal_rate(answers, self.markers),
+            kl_first_token(self.base_logprobs, logprobs),
+            answers,
+            good_refusals,
+        )
 
     def record(self, result: TrialEval) -> dict[str, Any]:
         """Evaluation for `eval/*.json`: the objectives and every answer with its refusal flag."""
@@ -427,6 +456,10 @@ class Evaluator:
             "answers": [
                 {"id": name, "refusal": is_refusal(answer, self.markers), "answer": answer[:MAX_ANSWER_CHARS]}
                 for (name, _, _), answer in zip(self.bad, result.answers, strict=True)
+            ],
+            "good_refusals": [
+                {"id": f"good-{index}", "refusal": flag}
+                for index, flag in enumerate(result.good_refusals)
             ],
         }
 
@@ -708,10 +741,53 @@ def run_abliteration(
         for index, (rendered, ids) in enumerate(render(_select_tasks(eval_bad, section.eval_limit, cfg.run.seed)))
     ]
     good = [ids for _, ids in render(_select_tasks(eval_good, section.eval_limit, cfg.run.seed))]
-    evaluator = Evaluator(policy, cfg, bad, good, markers)
+    evaluator = Evaluator(policy, cfg, bad, good, markers, keep_good_answers=section.eval_filter)
     baseline = evaluator()
-    _write_json(Path(artifacts.eval_dir) / "baseline.json", evaluator.record(baseline))
+    baseline_record = evaluator.record(baseline)
+    _write_json(Path(artifacts.eval_dir) / "baseline.json", baseline_record)
     logger.info("base model: refusal rate %.3f on %d bad prompts", baseline.refusal_rate, len(bad))
+
+    # 4. the eval filter: only prompts where the base model shows the behaviour under study
+    if section.eval_filter:
+        bad_flags = [row["refusal"] for row in baseline_record["answers"]]
+        kept_bad = [item for item, flag in zip(bad, bad_flags, strict=True) if flag]
+        kept_good = [
+            item for item, flag in zip(good, baseline.good_refusals, strict=True) if not flag
+        ]
+        dropped_bad = len(bad) - len(kept_bad)
+        dropped_good = len(good) - len(kept_good)
+        if not kept_bad or not kept_good:
+            raise ConfigError(
+                f"abliteration.eval_filter: the base model leaves no eval prompts "
+                f"(bad kept {len(kept_bad)}/{len(bad)}, good kept {len(kept_good)}/{len(good)}): "
+                "set eval_filter: false or choose another eval split"
+            )
+        _write_json(
+            Path(artifacts.eval_dir) / "filter.json",
+            {
+                "rule": "base refuses bad, base answers good",
+                "bad_total": len(bad),
+                "bad_kept": len(kept_bad),
+                "good_total": len(good),
+                "good_kept": len(kept_good),
+                "dropped_bad_ids": [name for (name, _, _), flag in zip(bad, bad_flags, strict=True) if not flag],
+                "dropped_good_ids": [
+                    f"good-{index}" for index, flag in enumerate(baseline.good_refusals) if flag
+                ],
+            },
+        )
+        logger.info(
+            "eval filter: %d/%d bad and %d/%d good prompts (base must refuse bad and answer good)",
+            len(kept_bad),
+            len(bad),
+            len(kept_good),
+            len(good),
+        )
+        bad, good, evaluator = (
+            kept_bad,
+            kept_good,
+            Evaluator(policy, cfg, kept_bad, kept_good, markers),
+        )
 
     ablator = Ablator(policy, directions, section.row_normalization)
     settings = {
@@ -723,6 +799,7 @@ def run_abliteration(
         "direction_split": section.direction_split,
         "eval_split": section.eval_split,
         "eval_limit": section.eval_limit,
+        "eval_filter": section.eval_filter,
         "max_new_tokens": section.max_new_tokens,
         "orthogonalize_direction": section.orthogonalize_direction,
         "row_normalization": section.row_normalization,

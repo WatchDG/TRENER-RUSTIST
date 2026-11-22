@@ -386,6 +386,7 @@ ARCHITECTURE = Architecture(
     build_images=GemmaImageEncoder,
     build_audio=GemmaAudioEncoder,
     placeholder=placeholder,
+    attn_subconfigs={"text": "text_config", "video": "vision_config", "audio": "audio_config"},
 )
 
 

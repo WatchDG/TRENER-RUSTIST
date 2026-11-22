@@ -603,6 +603,7 @@ def load_policy(cfg: JoltConfig, *, with_master: bool = True) -> Policy:
         dtype=dtype,
         attn_implementation=cfg.model.attn_implementation,
         trust_remote_code=cfg.model.trust_remote_code,
+        attn_overrides=cfg.model.attn_overrides,
     )
     media = load_media_encoder(
         model_path,

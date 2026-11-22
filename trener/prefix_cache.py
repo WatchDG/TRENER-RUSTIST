@@ -401,6 +401,7 @@ def attach_prefix_cache(cfg: Any, policy: Any) -> PrefixCache | None:
         "compile_kernels": bool(cfg.model.compile_kernels),
         "conv_kernel": bool(cfg.model.conv_kernel),
         "attn_implementation": str(cfg.model.attn_implementation),
+        "attn_overrides": dict(cfg.model.attn_overrides),
         "torch": torch.__version__,
     }
     cache = PrefixCache(
